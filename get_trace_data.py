@@ -3,21 +3,14 @@ import argparse
 import multiprocessing
 import requests
 import os
-import time
-from dateutil import parser
 import pickle
 import json
 from typing import Callable
+import mapillary
 
 OUTPUT_DIR = 'output'
 TEMP_DIR = 'tmp'
 SECTIONS_PICKLE_FILENAME = 'sections.pickle'
-
-SEQUENCES_PER_PAGE_DEFAULT = 50  # How many sequences to receive on each page of the API call
-SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = 5  # We will skip any sequences if they have fewer than this number of images
-MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
-SEQUENCE_URL = 'https://a.mapillary.com/v3/sequences_without_images?client_id={}&bbox={}&per_page={}'
-IMAGES_URL = 'https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}'
 
 
 def initialize_dirs(bbox: str) -> tuple[str, str]:
@@ -91,8 +84,9 @@ def split_bbox(output_dir: str, bbox: str, to_bbox_str: Callable[[float, float, 
     return bbox_sections
 
 
-def process_bbox_sections(output_dir: str, output_tmp_dir: str, session: requests.Session, map_client_id: str,
-                          bbox_sections: list[str], conf: any) -> None:
+def process_bbox_sections(output_dir: str, output_tmp_dir: str, session: requests.Session, bbox_sections: list[str],
+                          get_trace_data_for_bbox: Callable[[requests.Session, str, any], dict[str, list]],
+                          conf: any) -> None:
     for bbox in bbox_sections:
         result_filename = os.path.join(output_dir, bbox + '.pickle')  # The file on disk where we will store trace data
 
@@ -109,7 +103,7 @@ def process_bbox_sections(output_dir: str, output_tmp_dir: str, session: request
                                                                                                                   e))
 
         # We haven't pulled API trace data for this bbox section yet
-        trace_data = get_trace_data_for_bbox(session, map_client_id, bbox, conf)
+        trace_data = get_trace_data_for_bbox(session, bbox, conf)
 
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
@@ -118,64 +112,19 @@ def process_bbox_sections(output_dir: str, output_tmp_dir: str, session: request
         os.rename(temp_filename, result_filename)
 
 
-def get_trace_data_for_bbox(session: requests.Session, map_client_id: str, bbox: str, conf: any) -> dict[str, list]:
-    result, elapsed = {}, 0
-    # try:
-    start = time.time()
-    # Check to see if user specified any overrides in conf JSON
-    seq_per_page = conf['sequences_per_page'] if 'sequences_per_page' in conf else SEQUENCES_PER_PAGE_DEFAULT
-    skip_if_fewer_imgs_than = conf[
-        'skip_if_fewer_images_than'] if 'skip_if_fewer_images_than' in conf else SKIP_IF_FEWER_IMAGES_THAN_DEFAULT
-
-    print('Getting seq for bbox={}'.format(bbox))
-    next_url = SEQUENCE_URL.format(map_client_id, bbox, seq_per_page)
-    page = 1
-    while next_url:
-        print('Page {}, url={}'.format(page, next_url))
-        sequence_resp = session.get(next_url)
-        sequence_keys = []
-        for seq_f in sequence_resp.json()['features']:
-            # Skip sequences that have too few images
-            if len(seq_f['geometry']['coordinates']) >= skip_if_fewer_imgs_than:
-                sequence_keys.append(seq_f['properties']['key'])
-        # TODO: Paginate images
-        images_resp = session.get(IMAGES_URL.format(map_client_id, ','.join(sequence_keys)))
-        for img_f in images_resp.json()['features']:
-            if img_f['properties']['sequence_key'] not in result:
-                result[img_f['properties']['sequence_key']] = []
-            result[img_f['properties']['sequence_key']].append((
-                parser.isoparse(img_f['properties']['captured_at']).timestamp(),  # Epoch time
-                img_f['geometry']['coordinates']
-            ))
-
-        # Check if there is a next page or if we are finished with this bbox
-        next_url = sequence_resp.links['next']['url'] if 'next' in sequence_resp.links else None
-        page += 1
-
-    stop = time.time()
-    elapsed = stop - start
-    print('\n\n##################\nFinished processing seqs for bbox={}, elapsed time: {}'.format(bbox, elapsed))
-    print('{}\n##################\n\n'.format(result))
-    # with response_count.get_lock():
-    #     response_count.value += 1
-    # except Exception as e:
-    #     print(e)
-
-    return result
-
-
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
-    # TODO: Make this optional and do the planet if so
+    # TODO: Make this optional and do the planet if so?
     arg_parser.add_argument('--bbox', type=str, help='Filter by the bounding box on the map, given as `min_longitude,'
                                                      'min_latitude,max_longitude,max_latitude`', required=True)
     arg_parser.add_argument('--conf', type=str,
-                            help='JSON of configurable settings for this script, e.g. {\"source\":\"mapillary\",\"mcid\":\"xxx\",\"sequences_per_page\":50,\"skip_if_fewer_images_than\":5}',
+                            help='JSON of configurable settings for this script, e.g. {\"source\":\"mapillary\",'
+                                 '\"mcid\":\"xxx\",\"sequences_per_page\":50,\"skip_if_fewer_images_than\":5}',
                             required=True)
-    # arg_parser.add_argument('--concurrency', type=int,
-    #                         help='The number of processes to use to make requests, by default '
-    #                              'your # of cpus',
-    #                         default=multiprocessing.cpu_count())
+    arg_parser.add_argument('--concurrency', type=int,
+                            help='The number of processes to use to make requests, by default '
+                                 'your # of cpus',
+                            default=multiprocessing.cpu_count())
     # arg_parser.add_argument('--output-dir', type=str, help='Optional custom name for the directory in which to place '
     #                                                        'the result of each request (default is the bbox string)')
     # TODO: Change print() to use logger and add logging level as arg
@@ -190,25 +139,19 @@ if __name__ == '__main__':
         raise
 
     if conf['source'] == 'mapillary':
-        # TODO: Actually split up logic btwn source-generic and Mapillary
-
+        # Do a quick check to see if user specified the mandatory 'mcid' in conf JSON
         if 'mcid' not in conf:
             raise KeyError('Missing "mcid" (Mapillary Client ID) key  in --conf JSON.')
-        mcid = conf['mcid']
 
         # Create dirs
         output_dir, output_tmp_dir = initialize_dirs(parsed_args.bbox)
 
-
-        def mapillary_to_bbox(llo, lla, mlo, mla):
-            return ','.join([str(llo), str(lla), str(mlo), str(mla)])
-
-
         # Break the bbox into sections and save it to a pickle file
-        bbox_sections = split_bbox(output_dir, parsed_args.bbox, mapillary_to_bbox)
+        bbox_sections = split_bbox(output_dir, parsed_args.bbox, mapillary.to_bbox)
 
         req_session = requests.Session()
-        process_bbox_sections(output_dir, output_tmp_dir, req_session, mcid, bbox_sections, conf)
+        process_bbox_sections(output_dir, output_tmp_dir, req_session, bbox_sections, mapillary.get_trace_data_for_bbox,
+                              conf)
 
         print('Finished successfully!')
     else:
