@@ -4,7 +4,6 @@ import requests
 
 SEQUENCES_PER_PAGE_DEFAULT = 50  # How many sequences to receive on each page of the API call
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = 5  # We will skip any sequences if they have fewer than this number of images
-MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 SEQUENCE_URL = 'https://a.mapillary.com/v3/sequences_without_images?client_id={}&bbox={}&per_page={}'
 IMAGES_URL = 'https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}'
 

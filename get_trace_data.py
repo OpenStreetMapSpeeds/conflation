@@ -11,6 +11,7 @@ import mapillary
 OUTPUT_DIR = 'output'
 TEMP_DIR = 'tmp'
 SECTIONS_PICKLE_FILENAME = 'sections.pickle'
+MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 
 
 def initialize_dirs(bbox: str) -> tuple[str, str]:
