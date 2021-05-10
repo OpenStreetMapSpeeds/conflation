@@ -38,20 +38,20 @@ def initialize_dirs(bbox: str) -> tuple[str, str]:
     return output_dir, output_tmp_dir
 
 
-def split_bbox(output_dir: str, bbox: str, to_bbox_str: Callable[[float, float, float, float], str],
-               section_size: float = 0.05) -> list[str]:
+def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float, float, float], str],
+               section_size: float = 0.025) -> list[str]:
     """
     Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
     section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
     removed)
-    :param output_dir: output dir name
+    :param output_dir_: output dir name
     :param bbox: bbox string from arg
     :param to_bbox_str: function that takes (min_long, min_lat, max_long, max_lat) bbox definition coordinates, and
     returns a string that we will feed into the next function. Should be the same format as the API source expects
     :param section_size: the smaller bbox sections will have max_long-min_long = max_lat-min_lat = section_size
     :return: list of bbox section strings, whose format will be dictated by the to_bbox_str function
     """
-    sections_filename = os.path.join(output_dir, SECTIONS_PICKLE_FILENAME)
+    sections_filename = os.path.join(output_dir_, SECTIONS_PICKLE_FILENAME)
 
     try:
         print('Reading bbox_sections from disk...')
@@ -61,7 +61,7 @@ def split_bbox(output_dir: str, bbox: str, to_bbox_str: Callable[[float, float, 
         min_long, min_lat, max_long, max_lat = [float(s) for s in bbox.split(',')]
 
         # Perform a check to see how many sections would be generated
-        num_files = ((max_long - min_long) // section_size + 1) * ((max_lat - min_lat) // section_size + 1)
+        num_files = int(((max_long - min_long) // section_size + 1) * ((max_lat - min_lat) // section_size + 1))
         if num_files > MAX_FILES_IN_DIR:
             # TODO: Check len of bbox_sections, if over some size limit, we split things up
             print('WARNING: {} bbox sections will be generated and a .pickle file will be created for all of them, '
@@ -85,32 +85,51 @@ def split_bbox(output_dir: str, bbox: str, to_bbox_str: Callable[[float, float, 
     return bbox_sections
 
 
-def process_bbox_sections(output_dir: str, output_tmp_dir: str, session: requests.Session, bbox_sections: list[str],
-                          get_trace_data_for_bbox: Callable[[requests.Session, str, any], dict[str, list]],
-                          conf: any) -> None:
-    for bbox in bbox_sections:
-        result_filename = os.path.join(output_dir, bbox + '.pickle')  # The file on disk where we will store trace data
+def initialize_multiprocess(global_output_dir_: str, global_output_tmp_dir_: str, global_conf_: any,
+                            get_trace_data_for_bbox_: Callable[[requests.Session, str, any], dict[str, list]],
+                            finished_bbox_sections_: multiprocessing.Value):
+    # For persistent connections
+    global session
+    session = requests.Session()
 
-        if os.path.exists(result_filename):  # FIXME
-            print('Seq for bbox={} exists on disk, reading...')
-            try:
-                # TODO: Remove this, next step just needs the trace data on disk
-                trace_data = pickle.load(open(os.path.join(output_dir, bbox + '.pickle'), 'rb'))
-                print('\n\n##################\nPulled from disk seqs for bbox={}'.format(bbox))
-                print('{}\n##################\n\n'.format(trace_data))
-                continue
-            except (OSError, IOError) as e:
-                print('ERROR: bbox={} was marked as completed, but error while pulling data from disk: {}'.format(bbox,
-                                                                                                                  e))
+    # So each process knows the output / tmp dirs
+    global global_output_dir
+    global_output_dir = global_output_dir_
+    global global_output_tmp_dir
+    global_output_tmp_dir = global_output_tmp_dir_
 
-        # We haven't pulled API trace data for this bbox section yet
-        trace_data = get_trace_data_for_bbox(session, bbox, conf)
+    # So each process knows the conf provided
+    global global_conf
+    global_conf = global_conf_
 
-        # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
-        # to the real location
-        temp_filename = os.path.join(output_tmp_dir, bbox + '.pickle')
-        pickle.dump(trace_data, open(temp_filename, 'wb'))
-        os.rename(temp_filename, result_filename)
+    global get_trace_data_for_bbox
+    get_trace_data_for_bbox = get_trace_data_for_bbox_
+
+    global finished_bbox_sections
+    finished_bbox_sections = finished_bbox_sections_
+
+
+def pull_and_save_trace_for_bbox(bbox: str) -> None:
+    # The file on disk where we will store trace data
+    result_filename = os.path.join(global_output_dir, bbox + '.pickle')
+
+    if os.path.exists(result_filename):
+        print('Seq for bbox={} already exists on disk! Skipping...'.format(bbox))
+        with finished_bbox_sections.get_lock():
+            finished_bbox_sections.value += 1
+        return
+
+    # We haven't pulled API trace data for this bbox section yet
+    trace_data = get_trace_data_for_bbox(session, bbox, global_conf)
+
+    # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
+    # to the real location
+    temp_filename = os.path.join(global_output_tmp_dir, bbox + '.pickle')
+    pickle.dump(trace_data, open(temp_filename, 'wb'))
+    os.rename(temp_filename, result_filename)
+
+    with finished_bbox_sections.get_lock():
+        finished_bbox_sections.value += 1
 
 
 if __name__ == '__main__':
@@ -126,8 +145,6 @@ if __name__ == '__main__':
                             help='The number of processes to use to make requests, by default '
                                  'your # of cpus',
                             default=multiprocessing.cpu_count())
-    # arg_parser.add_argument('--output-dir', type=str, help='Optional custom name for the directory in which to place '
-    #                                                        'the result of each request (default is the bbox string)')
     # TODO: Change print() to use logger and add logging level as arg
 
     parsed_args = arg_parser.parse_args()
@@ -142,7 +159,7 @@ if __name__ == '__main__':
     if conf['source'] == 'mapillary':
         # Do a quick check to see if user specified the mandatory 'mcid' in conf JSON
         if 'mcid' not in conf:
-            raise KeyError('Missing "mcid" (Mapillary Client ID) key  in --conf JSON.')
+            raise KeyError('Missing "mcid" (Mapillary Client ID) key in --conf JSON.')
 
         # Create dirs
         output_dir, output_tmp_dir = initialize_dirs(parsed_args.bbox)
@@ -150,11 +167,26 @@ if __name__ == '__main__':
         # Break the bbox into sections and save it to a pickle file
         bbox_sections = split_bbox(output_dir, parsed_args.bbox, mapillary.to_bbox)
 
-        req_session = requests.Session()
-        process_bbox_sections(output_dir, output_tmp_dir, req_session, bbox_sections, mapillary.get_trace_data_for_bbox,
-                              conf)
+        finished_bbox_sections = multiprocessing.Value('i', 0)
+        with multiprocessing.Pool(initializer=initialize_multiprocess,
+                                  initargs=(output_dir, output_tmp_dir, conf, mapillary.get_trace_data_for_bbox,
+                                            finished_bbox_sections),
+                                  processes=parsed_args.concurrency) as pool:
+            result = pool.map_async(pull_and_save_trace_for_bbox, bbox_sections)
 
-        print('Finished successfully!')
+            print('Placing {} results in {}...'.format(len(bbox_sections), output_dir))
+            progress = 0
+            increment = 5
+            while not result.ready():
+                result.wait(timeout=5)
+                next_progress = int(finished_bbox_sections.value / len(bbox_sections) * 100)
+                if int(next_progress / increment) > progress:
+                    print('Current progress: {}%'.format(next_progress))
+                    progress = int(next_progress / increment)
+            if progress != 100 / increment:
+                print('Current progress: 100%')
+
+            print('Finished successfully!')
     else:
         raise NotImplementedError(
             'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(conf['source']))
