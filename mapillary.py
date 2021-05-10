@@ -80,7 +80,7 @@ def pull_and_save_trace_for_bbox(bbox: str) -> None:
             return
 
         # We haven't pulled API trace data for this bbox section yet
-        trace_data = trace_data_request(session, bbox, global_traces_source)
+        trace_data = make_trace_data_requests(session, bbox, global_traces_source)
 
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
@@ -94,7 +94,7 @@ def pull_and_save_trace_for_bbox(bbox: str) -> None:
         print('ERROR: Failed to pull trace data: {}'.format(repr(e)))
 
 
-def trace_data_request(session_: requests.Session, bbox: str, conf: any) -> dict[str, list]:
+def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any) -> dict[str, list]:
     result, elapsed = {}, 0
     start = time.time()
 
