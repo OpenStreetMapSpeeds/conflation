@@ -18,7 +18,7 @@ def get_trace_data_for_bbox(session: requests.Session, bbox: str, conf: any) -> 
     # try:
     start = time.time()
 
-    map_client_id = conf['mcid']  # The Mapillary client ID, mandatory key of conf
+    map_client_id = conf['client_id']  # The Mapillary client ID, mandatory key of conf
 
     # Check to see if user specified any overrides in conf JSON
     seq_per_page = conf['sequences_per_page'] if 'sequences_per_page' in conf else SEQUENCES_PER_PAGE_DEFAULT

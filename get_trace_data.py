@@ -110,40 +110,44 @@ def initialize_multiprocess(global_output_dir_: str, global_output_tmp_dir_: str
 
 
 def pull_and_save_trace_for_bbox(bbox: str) -> None:
-    # The file on disk where we will store trace data
-    result_filename = os.path.join(global_output_dir, bbox + '.pickle')
+    try:
+        # The file on disk where we will store trace data
+        result_filename = os.path.join(global_output_dir, bbox + '.pickle')
 
-    if os.path.exists(result_filename):
-        print('Seq for bbox={} already exists on disk! Skipping...'.format(bbox))
+        if os.path.exists(result_filename):
+            print('Seq for bbox={} already exists on disk! Skipping...'.format(bbox))
+            with finished_bbox_sections.get_lock():
+                finished_bbox_sections.value += 1
+            return
+
+        # We haven't pulled API trace data for this bbox section yet
+        trace_data = get_trace_data_for_bbox(session, bbox, global_conf)
+
+        # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
+        # to the real location
+        temp_filename = os.path.join(global_output_tmp_dir, bbox + '.pickle')
+        pickle.dump(trace_data, open(temp_filename, 'wb'))
+        os.rename(temp_filename, result_filename)
+
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
-        return
-
-    # We haven't pulled API trace data for this bbox section yet
-    trace_data = get_trace_data_for_bbox(session, bbox, global_conf)
-
-    # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
-    # to the real location
-    temp_filename = os.path.join(global_output_tmp_dir, bbox + '.pickle')
-    pickle.dump(trace_data, open(temp_filename, 'wb'))
-    os.rename(temp_filename, result_filename)
-
-    with finished_bbox_sections.get_lock():
-        finished_bbox_sections.value += 1
+    except Exception as e:
+        print('ERROR: Failed to pull trace data: {}'.format(repr(e)))
 
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser()
     # TODO: Make this optional and do the planet if so?
-    arg_parser.add_argument('--bbox', type=str, help='Filter by the bounding box on the map, given as `min_longitude,'
-                                                     'min_latitude,max_longitude,max_latitude`', required=True)
-    arg_parser.add_argument('--conf', type=str,
-                            help='JSON of configurable settings for this script, e.g. {\"source\":\"mapillary\",'
-                                 '\"mcid\":\"xxx\",\"sequences_per_page\":50,\"skip_if_fewer_images_than\":5}',
+    arg_parser.add_argument('--bbox', type=str,
+                            help='Filter by the bounding box on the map, given as `min_longitude,min_latitude,'
+                                 'max_longitude,max_latitude`', required=True)
+    arg_parser.add_argument('--traces-source', type=str,
+                            help='JSON of configurable settings for where / how to pull the GPS trace, '
+                                 'e.g. {\"provider\":\"mapillary\",\"client_id\":\"xxx\",\"sequences_per_page\":50,'
+                                 '\"skip_if_fewer_images_than\":5}',
                             required=True)
     arg_parser.add_argument('--concurrency', type=int,
-                            help='The number of processes to use to make requests, by default '
-                                 'your # of cpus',
+                            help='The number of processes to use to make requests, by default your # of cpus',
                             default=multiprocessing.cpu_count())
     # TODO: Change print() to use logger and add logging level as arg
 
@@ -151,15 +155,15 @@ if __name__ == '__main__':
 
     # Determine source of trace data specified by config
     try:
-        conf = json.loads(parsed_args.conf)
+        traces_source = json.loads(parsed_args.traces_source)
     except json.decoder.JSONDecodeError:
-        print('ERROR: Could not parse --conf JSON={}'.format(parsed_args.conf))
+        print('ERROR: Could not parse --traces-source JSON={}'.format(parsed_args.traces_source))
         raise
 
-    if conf['source'] == 'mapillary':
-        # Do a quick check to see if user specified the mandatory 'mcid' in conf JSON
-        if 'mcid' not in conf:
-            raise KeyError('Missing "mcid" (Mapillary Client ID) key in --conf JSON.')
+    if traces_source['provider'] == 'mapillary':
+        # Do a quick check to see if user specified the mandatory 'client_id' in traces_source JSON
+        if 'client_id' not in traces_source:
+            raise KeyError('Missing "client_id" (Mapillary Client ID) key in --traces-source JSON.')
 
         # Create dirs
         output_dir, output_tmp_dir = initialize_dirs(parsed_args.bbox)
@@ -169,7 +173,7 @@ if __name__ == '__main__':
 
         finished_bbox_sections = multiprocessing.Value('i', 0)
         with multiprocessing.Pool(initializer=initialize_multiprocess,
-                                  initargs=(output_dir, output_tmp_dir, conf, mapillary.get_trace_data_for_bbox,
+                                  initargs=(output_dir, output_tmp_dir, traces_source, mapillary.get_trace_data_for_bbox,
                                             finished_bbox_sections),
                                   processes=parsed_args.concurrency) as pool:
             result = pool.map_async(pull_and_save_trace_for_bbox, bbox_sections)
@@ -186,7 +190,9 @@ if __name__ == '__main__':
             if progress != 100 / increment:
                 print('Current progress: 100%')
 
+            # TODO: Delete the tmp dir after run?
+
             print('Finished successfully!')
     else:
         raise NotImplementedError(
-            'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(conf['source']))
+            'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(traces_source['source']))
