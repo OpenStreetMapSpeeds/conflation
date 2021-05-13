@@ -9,6 +9,7 @@ import util
 
 SEQUENCES_PER_PAGE_DEFAULT = 50  # How many sequences to receive on each page of the API call
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = 10  # We will skip any sequences if they have fewer than this number of images
+# TODO: Make use of the start_date parameter
 SEQUENCE_URL = 'https://a.mapillary.com/v3/sequences_without_images?client_id={}&bbox={}&per_page={}'
 IMAGES_URL = 'https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}'
 
