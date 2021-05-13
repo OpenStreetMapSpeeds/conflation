@@ -1,9 +1,10 @@
 import time
-from dateutil import parser
 import requests
 import os
 import pickle
 import multiprocessing
+from dateutil import parser
+
 import util
 
 SEQUENCES_PER_PAGE_DEFAULT = 50  # How many sequences to receive on each page of the API call
@@ -12,13 +13,10 @@ SEQUENCE_URL = 'https://a.mapillary.com/v3/sequences_without_images?client_id={}
 IMAGES_URL = 'https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}'
 
 
-def run(bbox: str, traces_source: any, processes: int):
+def run(bbox: str, output_dir: str, output_tmp_dir: str, traces_source: any, processes: int):
     # Do a quick check to see if user specified the mandatory 'client_id' in traces_source JSON
     if 'client_id' not in traces_source:
         raise KeyError('Missing "client_id" (Mapillary Client ID) key in --traces-source JSON.')
-
-    # Create dirs
-    output_dir, output_tmp_dir = util.initialize_dirs(bbox)
 
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = util.split_bbox(output_dir, bbox, to_bbox)
@@ -74,7 +72,7 @@ def pull_and_save_trace_for_bbox(bbox: str) -> None:
         result_filename = os.path.join(global_output_dir, bbox + '.pickle')
 
         if os.path.exists(result_filename):
-            print('Seq for bbox={} already exists on disk! Skipping...'.format(bbox))
+            print('Seq already exists on disk for bbox={}. Skipping...'.format(bbox))
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
             return

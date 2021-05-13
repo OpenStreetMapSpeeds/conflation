@@ -1,6 +1,6 @@
 import os
-from typing import Callable
 import pickle
+from typing import Callable
 
 OUTPUT_DIR = 'output'
 TEMP_DIR = 'tmp'
@@ -10,7 +10,8 @@ MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 
 def initialize_dirs(bbox: str) -> tuple[str, str]:
     """
-    Creates all dirs needed for run if they don't exist
+    Creates all dirs needed for run if they don't exist.
+
     :param bbox: bbox string from arg
     :return: tuple of (output dir name, tmp dir name for any tmp pickle files)
     """
@@ -33,15 +34,16 @@ def initialize_dirs(bbox: str) -> tuple[str, str]:
 
 
 def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float, float, float], str],
-               section_size: float = 0.025) -> list[str]:
+               section_size: float = 0.05) -> list[str]:
     """
     Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
     section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
-    removed)
+    removed).
+
     :param output_dir_: output dir name
     :param bbox: bbox string from arg
     :param to_bbox_str: function that takes (min_long, min_lat, max_long, max_lat) bbox definition coordinates, and
-    returns a string that we will feed into the next function. Should be the same format as the API source expects
+        returns a string that we will feed into the next function. Should be the same format as the API source expects
     :param section_size: the smaller bbox sections will have max_long-min_long = max_lat-min_lat = section_size
     :return: list of bbox section strings, whose format will be dictated by the to_bbox_str function
     """
