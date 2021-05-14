@@ -24,13 +24,11 @@ Conflation aims to provide a *statistical approach* to estimating of driving spe
 estimates speeds across different road classes using open-source GPS trace data. The road classes used will be taken
 from [OpenStreetMap (OSM)](https://www.openstreetmap.org/), which delineates between motorways, trunks, primary roads,
 secondary roads, residential, etc. To further refine our estimates, we will also split up our results by geographic
-area (country and region), as well as by urban and rural settings.
-
-The main idea
+area (country and region), as well as by urban, suburban, and rural settings.
 
 ### Method
 
-A rough list of steps this script makes is as follows:
+A high-level methodology of this script is as follows:
 
 1. Create an `output/` folder where results will be stored.
     1. This script store intermediate results on disk, so that if a run is interrupted (either intentionally or
@@ -59,97 +57,52 @@ A rough list of steps this script makes is as follows:
 There is a specific JSON structure that this script outputs. Here is an example:
 
 ```json
-[
-  {
-    "iso3166-1": "us",
-    "iso3166-2": "pa",
-    "urban": {
-      "way": [
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8
-      ],
-      "link_exiting": [
-        9,
-        10,
-        11,
-        12,
-        13
-      ],
-      "link_turning": [
-        15,
-        16,
-        17,
-        18,
-        19
-      ],
-      "roundabout": [
-        21,
-        22,
-        23,
-        24,
-        25,
-        26,
-        27,
-        28
-      ],
-      "driveway": 29,
-      "alley": 30,
-      "parking_aisle": 31,
-      "drive-through": 32
-    },
-    "rural": {
-      "way": [
-        33,
-        34,
-        35,
-        36,
-        37,
-        38,
-        39,
-        40
-      ],
-      "link_exiting": [
-        41,
-        42,
-        43,
-        44,
-        45
-      ],
-      "link_turning": [
-        47,
-        48,
-        49,
-        50,
-        51
-      ],
-      "roundabout": [
-        53,
-        54,
-        55,
-        56,
-        57,
-        58,
-        59,
-        60
-      ],
-      "driveway": 61,
-      "alley": 62,
-      "parking_aisle": 63,
-      "drive-through": 64
-    }
+[{
+  "iso3166-1": "",
+  "iso3166-2": "",
+  "urban": {
+    "way": [80,40,30,30,25,20,15,10],
+    "link_exiting": [60,40,40,35,30],
+    "link_turning": [60,30,25,25,20],
+    "roundabout": [25,25,20,20,20,20,15,15],
+    "driveway": 15,
+    "alley": 10,
+    "parking_aisle": 10,
+    "drive-through": 10
+  },
+  "rural": {
+    "way": [95,60,50,40,35,25,20,10],
+    "link_exiting": [55,45,40,40,35],
+    "link_turning": [50,35,35,30,25],
+    "roundabout": [45,35,25,25,20,20,20,10],
+    "driveway": 15,
+    "alley": 10,
+    "parking_aisle": 15,
+    "drive-through": 10
   }
-]
+}]
 ```
 
 ## Running
 
-This project can be run by calling the `get_trace_data.py` script. There are a few args that need to be specified:
+### Quickstart Example
+
+This project uses Python 3.9. The script can be run by setting up a virtualenv, installing modules from 
+`requirements.txt`, and calling the `get_trace_data.py` script.
+
+Here is an example setup and run across a wide area in Manhattan NYC, with Mapillary client ID redacted (assuming you 
+have Python 3.9 installed using `python3`):
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python ./get_trace_data.py --bbox=-74.01763916015625,40.71135347314246,-73.97266387939453,40.74556629114773 --traces-source {\"provider\":\"mapillary\",\"client_id\":\"client_id\"}
+```
+
+### Arguments
+
+ There are a few args that need to be specified:
 
 | Argument | Behavior |
 |----------|----------|
@@ -170,15 +123,6 @@ following keys:
 | `sequences_per_page` | Optional - Number of [Mapillary sequences](https://www.mapillary.com/developer/api-documentation/#sequences) that should be pulled in each API call |
 | `skip_if_fewer_images_than` | Optional - Skip a Mapillary sequence if it has fewer Mapillary images than this value |
 
-Here is an example setup and run across a wide area in Manhattan NYC, with Mapillary client ID redacted (assuming you
-have Python 3.9 installed using `python3`):
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python ./get_trace_data.py --bbox=-74.01763916015625,40.71135347314246,-73.97266387939453,40.74556629114773 --traces-source {\"provider\":\"mapillary\",\"client_id\":\"client_id\"}
-```
 
 ## Contributing
 
