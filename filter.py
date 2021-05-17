@@ -75,7 +75,7 @@ def run(output_dir: str) -> None:
             map_matching_shape[0]['type'] = 'break'
             map_matching.map_match(map_matching_shape)
 
-            break
+            # break
         break
 
 
