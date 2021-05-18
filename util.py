@@ -34,7 +34,7 @@ def initialize_dirs(bbox: str) -> tuple[str, str]:
 
 
 def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float, float, float], str],
-               section_size: float = 0.05) -> list[str]:
+               section_size: float = 0.05) -> list[tuple[str, str]]:
     """
     Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
     section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
@@ -72,7 +72,15 @@ def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float,
             prev_lat = min_lat
             while prev_lat < max_lat:
                 cur_lat = min(prev_lat + section_size, max_lat)
-                bbox_sections.append(to_bbox_str(prev_long, prev_lat, cur_long, cur_lat))
+
+                # Convert the long / lat bbox bounds to a string that the trace source API can understand (using the
+                # given lambda)
+                bbox_str = to_bbox_str(prev_long, prev_lat, cur_long, cur_lat)
+
+                # The file on disk where we will store trace data
+                result_filename = os.path.join(output_dir_, bbox + '.pickle')
+
+                bbox_sections.append((bbox_str, result_filename))
                 prev_lat += section_size
             prev_long += section_size
 
