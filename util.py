@@ -34,7 +34,7 @@ def initialize_dirs(bbox: str) -> tuple[str, str]:
 
 
 def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float, float, float], str],
-               section_size: float = 0.05) -> list[tuple[str, str]]:
+               section_size: float = 0.25) -> list[tuple[str, str]]:
     """
     Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
     section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
