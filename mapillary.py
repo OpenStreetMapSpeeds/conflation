@@ -38,11 +38,8 @@ def run(bbox: str, output_dir: str, output_tmp_dir: str, traces_source: dict, pr
     bbox_sections = util.split_bbox(output_dir, bbox, to_bbox)
 
     finished_bbox_sections = multiprocessing.Value('i', 0)
-    manager = multiprocessing.Manager()
-    seen_seq_ids = manager.dict()
     with multiprocessing.Pool(initializer=initialize_multiprocess,
-                              initargs=(
-                                      output_dir, output_tmp_dir, traces_source, finished_bbox_sections, seen_seq_ids),
+                              initargs=(output_dir, output_tmp_dir, traces_source, finished_bbox_sections),
                               processes=processes) as pool:
         result = pool.map_async(pull_filter_and_save_trace_for_bbox, bbox_sections)
 
@@ -69,8 +66,15 @@ def to_bbox(llo: float, lla: float, mlo: float, mla: float) -> str:
     return ','.join([str(llo), str(lla), str(mlo), str(mla)])
 
 
+def is_within_bbox(lon: float, lat: float, bbox: list[float]) -> bool:
+    """
+    Checks if lon / lat coordinate is within a bbox in the format of [min_lon, min_lat, max_lon, max_lat]
+    """
+    return bbox[0] <= lon < bbox[2] and bbox[1] <= lat < bbox[3]
+
+
 def initialize_multiprocess(global_output_dir_: str, global_output_tmp_dir_: str, global_traces_source_: any,
-                            finished_bbox_sections_: multiprocessing.Value, seen_seq_ids_: dict) -> None:
+                            finished_bbox_sections_: multiprocessing.Value) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess API requests.
     """
@@ -100,10 +104,6 @@ def initialize_multiprocess(global_output_dir_: str, global_output_tmp_dir_: str
     global finished_bbox_sections
     finished_bbox_sections = finished_bbox_sections_
 
-    # Set of ids that we've already processed
-    global seen_seq_ids
-    seen_seq_ids = seen_seq_ids_
-
 
 def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
     """
@@ -125,7 +125,7 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
             return
 
         # We haven't pulled API trace data for this bbox section yet
-        trace_data = make_trace_data_requests(session, bbox, global_traces_source, seen_seq_ids)
+        trace_data = make_trace_data_requests(session, bbox, global_traces_source)
         print('Before filter: lens: {}'.format([len(t) for t in trace_data]))
 
         # Perform some simple filters to weed out bad trace data
@@ -144,7 +144,7 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
         print('ERROR: Failed to pull trace data: {}'.format(repr(e)))
 
 
-def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any, seen_seq_ids_: dict) -> list[list[dict]]:
+def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any) -> list[list[dict]]:
     """
     Makes the actual calls to Mapillary API to pull trace data for a given bbox string.
 
@@ -155,6 +155,7 @@ def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any, s
     :return: List of trace data sequences. Trace data is in format understood by Valhalla map matching process, i.e. it
         has 'lon', 'lat', 'time', and optionally 'radius' keys
     """
+    bbox_as_list = [float(d) for d in bbox.split(',')]
 
     # We will use this dict to group trace points by sequence ID
     sequences_by_id = {}
@@ -174,47 +175,44 @@ def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any, s
     seq_next_url = SEQUENCE_URL.format(map_client_id, bbox, seq_per_page, start_date)
     seq_page = 1
     while seq_next_url:
-        # print('@@ MAPILLARY: Seq Page {}, url={}'.format(seq_page, seq_next_url))
+        print('@@ MAPILLARY: Seq Page {}, url={}'.format(seq_page, seq_next_url))
         seq_resp = session_.get(seq_next_url, timeout=10)
         seq_ids = []
         for seq_f in seq_resp.json()['features']:
             seq_id = seq_f['properties']['key']
 
-            # Skip sequences we've already seen
-            if seq_id in seen_seq_ids_:
+            # Only process sequences that originated from this bbox. This prevents us from processing sequences twice.
+            origin_lon, origin_lat = seq_f['geometry']['coordinates'][0]
+            if not is_within_bbox(origin_lon, origin_lat, bbox_as_list):
+                print('@@@ MAPILLARY: Skipping seq b/c origin ({}, {}) not in bbox {}'.format(origin_lon, origin_lat,
+                                                                                              bbox))
                 continue
 
             # Skip sequences that have too few images
-            if len(seq_f['geometry']['coordinates']) >= skip_if_fewer_imgs_than:
-                # TODO: Persist changes to this seen_seq_id dict?
-                seq_ids.append(seq_id)
-                seen_seq_ids_[seq_id] = 0
+            if len(seq_f['geometry']['coordinates']) < skip_if_fewer_imgs_than:
+                continue
 
-        if len(seq_ids) == 0:
-            print('-')
-            # Check if there is a next sequence page or if we are finished with this bbox
-            seq_next_url = seq_resp.links['next']['url'] if 'next' in seq_resp.links else None
-            seq_page += 1
-            continue
+            seq_ids.append(seq_id)
 
-        # Paginate images within these sequences
-        img_next_url = IMAGES_URL.format(map_client_id, ','.join(seq_ids), img_per_page)
-        img_page = 1
-        while img_next_url:
-            print('@@@ MAPILLARY: Image Page {}, url={}'.format(img_page, img_next_url))
-            img_resp = session_.get(img_next_url, timeout=10)
-            for img_f in img_resp.json()['features']:
-                if img_f['properties']['sequence_key'] not in sequences_by_id:
-                    sequences_by_id[img_f['properties']['sequence_key']] = []
-                sequences_by_id[img_f['properties']['sequence_key']].append({
-                    'time': parser.isoparse(img_f['properties']['captured_at']).timestamp(),  # Epoch time
-                    'lon': img_f['geometry']['coordinates'][0],
-                    'lat': img_f['geometry']['coordinates'][1]
-                })
+        if len(seq_ids) > 0:
+            # Paginate images within these sequences
+            img_next_url = IMAGES_URL.format(map_client_id, ','.join(seq_ids), img_per_page)
+            img_page = 1
+            while img_next_url:
+                print('@@@ MAPILLARY: Image Page {}, url={}'.format(img_page, img_next_url))
+                img_resp = session_.get(img_next_url, timeout=10)
+                for img_f in img_resp.json()['features']:
+                    if img_f['properties']['sequence_key'] not in sequences_by_id:
+                        sequences_by_id[img_f['properties']['sequence_key']] = []
+                    sequences_by_id[img_f['properties']['sequence_key']].append({
+                        'time': parser.isoparse(img_f['properties']['captured_at']).timestamp(),  # Epoch time
+                        'lon': img_f['geometry']['coordinates'][0],
+                        'lat': img_f['geometry']['coordinates'][1]
+                    })
 
-            # Check if there is a next sequence page or if we are finished with this bbox
-            img_next_url = img_resp.links['next']['url'] if 'next' in img_resp.links else None
-            img_page += 1
+                # Check if there is a next image page or if we are finished with this sequence
+                img_next_url = img_resp.links['next']['url'] if 'next' in img_resp.links else None
+                img_page += 1
 
         # Check if there is a next sequence page or if we are finished with this bbox
         seq_next_url = seq_resp.links['next']['url'] if 'next' in seq_resp.links else None
