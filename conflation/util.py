@@ -1,6 +1,6 @@
 import os
-from typing import Callable
 import pickle
+from typing import Callable
 
 OUTPUT_DIR = 'output'
 TEMP_DIR = 'tmp'

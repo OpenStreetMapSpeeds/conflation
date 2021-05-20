@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
-import multiprocessing
 import json
-import mapillary
+import multiprocessing
 
-if __name__ == '__main__':
+from . import mapillary
+
+
+def main():
     arg_parser = argparse.ArgumentParser()
     # TODO: Make this optional and do the planet if so?
     arg_parser.add_argument('--bbox', type=str,
@@ -35,3 +37,8 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(
             'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(traces_source['source']))
+
+
+
+if __name__ == '__main__':
+    main()
