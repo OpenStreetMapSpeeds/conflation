@@ -131,12 +131,12 @@ following keys:
 We welcome contributions to Conflation. If you would like to report an issue, or even better fix an existing one, please
 use the [Conflation issue tracker](https://github.com/OpenStreetMapSpeeds/conflation/issues) on GitHub.
 
-To install the project in development mode plus the needed libraries, do a `pip install -e ".[dev]".
+To install the project in development mode plus the needed libraries, do a `pip install -e ".[dev]"`.
 
 We encourage you to install the pre-commit hooks by typing `pre-commit install` which will run the following commands to lint and style-check your code before committing:
 ```shell script
 flake8 .
-black 
+black .
 ```
 
 ### Tests

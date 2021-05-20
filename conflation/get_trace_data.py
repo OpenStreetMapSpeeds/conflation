@@ -39,6 +39,5 @@ def main():
             'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(traces_source['source']))
 
 
-
 if __name__ == '__main__':
     main()
