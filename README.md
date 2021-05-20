@@ -99,7 +99,7 @@ source venv/bin/activate
 pip install .
 conflation --bbox=-74.01763916015625,40.71135347314246,-73.97266387939453,40.74556629114773 --traces-source {\"provider\":\"mapillary\",\"client_id\":\"client_id\"}
 # or
-python3 conflation_runner.py --bbox=...
+python3 -m conflation --bbox=...
 ```
 
 ### Arguments
