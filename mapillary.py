@@ -170,7 +170,6 @@ def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any) -
     start_date = conf['start_date'] if 'start_date' in conf else SEQUENCE_START_DATE_DEFAULT
 
     # Paginate sequences within this bbox
-    # TODO: Add retries for Mapillary API calls
     print('@ MAPILLARY: Getting seq for bbox={}'.format(bbox))
     seq_next_url = SEQUENCE_URL.format(map_client_id, bbox, seq_per_page, start_date)
     seq_page = 1
@@ -181,7 +180,7 @@ def make_trace_data_requests(session_: requests.Session, bbox: str, conf: any) -
         for seq_f in seq_resp.json()['features']:
             seq_id = seq_f['properties']['key']
 
-            # Only process sequences that originated from this bbox. This prevents us from processing sequences twice.
+            # Only process sequences that originated from this bbox. This prevents us from processing sequences twice
             origin_lon, origin_lat = seq_f['geometry']['coordinates'][0]
             if not is_within_bbox(origin_lon, origin_lat, bbox_as_list):
                 print('@@@ MAPILLARY: Skipping seq b/c origin ({}, {}) not in bbox {}'.format(origin_lon, origin_lat,

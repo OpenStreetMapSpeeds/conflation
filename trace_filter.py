@@ -7,9 +7,7 @@ MINIMUM_TOTAL_TIME = 120  # seconds, can travel a couple edges
 MINIMUM_TOTAL_DISTANCE = 1000  # meters, about a few city blocks
 MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS = 5  # seconds, we need high granularity to make accurate map matches
 MAXIMUM_SPEED_BETWEEN_ADJACENT_POINTS = 160  # km / h, to weed out poor measurements and trains
-# 25%, max num of trace that are poor measurements as per MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS and
-# MAXIMUM_SPEED_BETWEEN_ADJACENT_POINTS
-MAXIMUM_POOR_MEASUREMENTS = 0.25
+MAXIMUM_POOR_MEASUREMENTS_PERCENT = 0.25  # 25%, max %age of traces that are marked as poor measurements
 
 
 def run(trace_data: list[list[dict]]) -> list[list[dict]]:
@@ -17,10 +15,11 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
     Performs simple filters on trace_data. A list of trace data will only be accepted if:
     - Total time of sequence exceeds MINIMUM_TOTAL_TIME
     - There are no out-of-order timestamps, i.e. all points are sequential
-    - Time between adjacent points is not too long, i.e. adjacent time deltas not more than
-        MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS
-    - Speed between adjacent points is not too fast, i.e. adjacent speeds not more than
-        MAXIMUM_SPEED_BETWEEN_ADJACENT_POINTS
+    - If time between adjacent points is too long, i.e. adjacent time deltas more than
+        MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS, increment 'num_poor_measurements' counter
+    - If speed between adjacent points is too fast, i.e. adjacent speeds more than
+        MAXIMUM_SPEED_BETWEEN_ADJACENT_POINTS, increment 'num_poor_measurements' counter
+    - The 'num_poor_measurements' counter is too high as per MAXIMUM_POOR_MEASUREMENTS_PERCENT
     - Total distance of sequence exceeds MINIMUM_TOTAL_DISTANCE
     - Mean speed is above the walking / driving threshold, MINIMUM_MEAN_SPEED
 
@@ -78,7 +77,7 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
             print('Skipping b/c should skip seq')
             continue
 
-        if num_poor_measurements / len(sequence) > 0.25:
+        if num_poor_measurements / len(sequence) > MAXIMUM_POOR_MEASUREMENTS_PERCENT:
             print('Skipping b/c too many latent traces {}'.format(num_poor_measurements))
             continue
 

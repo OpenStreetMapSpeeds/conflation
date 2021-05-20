@@ -59,7 +59,8 @@ def split_bbox(output_dir_: str, bbox: str, to_bbox_str: Callable[[float, float,
         # Perform a check to see how many sections would be generated
         num_files = int(((max_long - min_long) // section_size + 1) * ((max_lat - min_lat) // section_size + 1))
         if num_files > MAX_FILES_IN_DIR:
-            # TODO: Check len of bbox_sections, if over some size limit, we split things up
+            # TODO: Split up the bbox sections further into 'pages', and use these as different dirs to put output
+            #  in, that way we won't ever have too many files in one dir
             print('WARNING: {} bbox sections will be generated and a .pickle file will be created for all of them, '
                   'violating the MAX_FILES_IN_DIR={}'.format(num_files, MAX_FILES_IN_DIR))
         else:
