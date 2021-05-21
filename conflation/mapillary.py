@@ -11,9 +11,8 @@ from conflation import util
 from conflation import trace_filter
 
 SEQUENCES_PER_PAGE_DEFAULT = 10  # How many sequences to receive on each page of the API call
-IMAGES_PER_PAGE_DEFAULT = 1000  # How many sequences to receive on each page of the API call
-# We only look for sequences beyond the start date, by default a year ago
-SEQUENCE_START_DATE_DEFAULT = (
+IMAGES_PER_PAGE_DEFAULT = 1000  # How many images to receive on each page of the API call
+SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to a year old
     datetime.date.today() - datetime.timedelta(days=365)
 ).isoformat()
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = (
@@ -23,24 +22,20 @@ SEQUENCE_URL = "https://a.mapillary.com/v3/sequences_without_images?client_id={}
 IMAGES_URL = "https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}&per_page={}"
 
 
-def run(
-    bbox: str, output_dir: str, output_tmp_dir: str, traces_source: dict, processes: int
-) -> None:
+def run(bbox: str, output_dir: str, output_tmp_dir: str, config: dict, processes: int) -> None:
     """
     Entrypoint for pulling trace date from Mapillary APIs. Will pull all trace data in the given bbox and store it in
-    the output_dir, using the number of processes specified and any conf values from traces_source.
+    the output_dir, using the number of processes specified and any conf values from the `config` JSON.
 
     :param bbox: Bounding box we are searching over, in the format of 'min_lon,min_lat,max_lon,max_lat'
     :param output_dir: Dir where trace data will be pickled to
     :param output_tmp_dir: Dir where temp output files will be stored (should be empty upon completion)
-    :param traces_source: Dict of configs, see the conf param of make_trace_data_requests()
+    :param config: Dict of configs, see the conf param of make_trace_data_requests()
     :param processes: Number of threads to use
     """
-    # Do a quick check to see if user specified the mandatory 'client_id' in traces_source JSON
-    if "client_id" not in traces_source:
-        raise KeyError(
-            'Missing "client_id" (Mapillary Client ID) key in --traces-source JSON.'
-        )
+    # Do a quick check to see if user specified the mandatory 'client_id' in config JSON
+    if "client_id" not in config:
+        raise KeyError('Missing "client_id" (Mapillary Client ID) key in --config JSON.')
 
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = util.split_bbox(output_dir, bbox, to_bbox)
@@ -48,7 +43,7 @@ def run(
     finished_bbox_sections = multiprocessing.Value("i", 0)
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
-        initargs=(output_dir, output_tmp_dir, traces_source, finished_bbox_sections),
+        initargs=(output_dir, output_tmp_dir, config, finished_bbox_sections),
         processes=processes,
     ) as pool:
         result = pool.map_async(pull_filter_and_save_trace_for_bbox, bbox_sections)
@@ -86,7 +81,7 @@ def is_within_bbox(lon: float, lat: float, bbox: list[float]) -> bool:
 def initialize_multiprocess(
     global_output_dir_: str,
     global_output_tmp_dir_: str,
-    global_traces_source_: any,
+    global_config_: any,
     finished_bbox_sections_: multiprocessing.Value,
 ) -> None:
     """
@@ -109,8 +104,8 @@ def initialize_multiprocess(
     global_output_tmp_dir = global_output_tmp_dir_
 
     # So each process knows the conf provided
-    global global_traces_source
-    global_traces_source = global_traces_source_
+    global global_config
+    global_config = global_config_
 
     # Integer counter of num of finished bbox_sections
     global finished_bbox_sections
@@ -137,7 +132,7 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
             return
 
         # We haven't pulled API trace data for this bbox section yet
-        trace_data = make_trace_data_requests(session, bbox, global_traces_source)
+        trace_data = make_trace_data_requests(session, bbox, global_config)
         print("Before filter: lens: {}".format([len(t) for t in trace_data]))
 
         # Perform some simple filters to weed out bad trace data

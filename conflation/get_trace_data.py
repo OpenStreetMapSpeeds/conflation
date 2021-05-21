@@ -17,7 +17,7 @@ def main():
         required=True,
     )
     arg_parser.add_argument(
-        "--traces-source",
+        "--config",
         type=str,
         help='JSON of configurable settings for where / how to pull the GPS trace, e.g. {"provider":"mapillary","client_id":"xxx","sequences_per_page":50,"skip_if_fewer_images_than":5, "start_date":"2020-01-01"}',
         required=True,
@@ -38,27 +38,25 @@ def main():
 
     # Determine source of trace data specified by config
     try:
-        traces_source = json.loads(parsed_args.traces_source)
+        config = json.loads(parsed_args.config)
     except json.decoder.JSONDecodeError:
-        print(
-            "ERROR: Could not parse --traces-source JSON={}".format(parsed_args.traces_source)
-        )
+        print("ERROR: Could not parse --config JSON={}".format(parsed_args.config))
         raise
 
     # Pull and filter trace data
     print("Pulling trace data from API...")
-    if traces_source["provider"] == "mapillary":
+    if config["provider"] == "mapillary":
         mapillary.run(
             parsed_args.bbox,
             output_dir,
             output_tmp_dir,
-            traces_source,
+            config,
             parsed_args.concurrency,
         )
     else:
         raise NotImplementedError(
             'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(
-                traces_source["source"]
+                config["source"]
             )
         )
 
