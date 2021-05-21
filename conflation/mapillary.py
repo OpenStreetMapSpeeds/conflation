@@ -1,10 +1,12 @@
-import time
 from dateutil import parser
-import requests
+import multiprocessing
 import os
 import pickle
-import multiprocessing
-import util
+import time
+
+import requests
+
+from . import util
 
 SEQUENCES_PER_PAGE_DEFAULT = 50  # How many sequences to receive on each page of the API call
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = 10  # We will skip any sequences if they have fewer than this number of images
