@@ -10,3 +10,6 @@ output/
 
 # tools
 .idea/
+
+# macOS
+*.DS_Store

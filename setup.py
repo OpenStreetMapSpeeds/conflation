@@ -25,17 +25,8 @@ setup(
     python_requires=">=3.6.0",
     url=about["__url__"],
     packages=find_packages(),
-    install_requires=[
-        "python-dateutil>=2.0.0",
-        "requests>=2.20.2"
-    ],
-    extras_require={
-        "dev": [
-            "pre-commit",
-            "flake8",
-            "black"
-        ]
-    },
+    install_requires=["python-dateutil>=2.0.0", "requests>=2.20.2"],
+    extras_require={"dev": ["pre-commit", "flake8", "black"]},
     entry_points={"console_scripts": ["conflation=conflation.get_trace_data:main"]},
     license="MIT",
     classifiers=[
@@ -48,6 +39,6 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: Implementation :: CPython",
-        "Programming Language :: Python :: Implementation :: PyPy"
+        "Programming Language :: Python :: Implementation :: PyPy",
     ],
 )
