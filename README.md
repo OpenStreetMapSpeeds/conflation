@@ -96,8 +96,10 @@ have Python 3.9 installed using `python3`):
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-python ./get_trace_data.py --bbox=-74.01763916015625,40.71135347314246,-73.97266387939453,40.74556629114773 --traces-source {\"provider\":\"mapillary\",\"client_id\":\"client_id\"}
+pip install .
+conflation --bbox=-74.01763916015625,40.71135347314246,-73.97266387939453,40.74556629114773 --traces-source {\"provider\":\"mapillary\",\"client_id\":\"client_id\"}
+# or
+python3 -m conflation --bbox=...
 ```
 
 ### Arguments
@@ -128,6 +130,14 @@ following keys:
 
 We welcome contributions to Conflation. If you would like to report an issue, or even better fix an existing one, please
 use the [Conflation issue tracker](https://github.com/OpenStreetMapSpeeds/conflation/issues) on GitHub.
+
+To install the project in development mode plus the needed libraries, do a `pip install -e ".[dev]"`.
+
+We encourage you to install the pre-commit hooks by typing `pre-commit install` which will run the following commands to lint and style-check your code before committing:
+```shell script
+flake8 .
+black .
+```
 
 ### Tests
 

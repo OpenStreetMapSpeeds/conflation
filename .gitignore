@@ -1,5 +1,15 @@
-venv/
-output/
-.idea/
+# python/pip stuff
 __pycache__/
+build/
+dist/
+*egg-info/
+
+# local dirs
+*venv/
+output/
+
+# tools
+.idea/
+
+# macOS
 *.DS_Store
