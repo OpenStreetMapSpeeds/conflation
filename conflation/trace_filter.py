@@ -5,9 +5,13 @@ from math import radians, cos, sin, asin, sqrt
 MINIMUM_MEAN_SPEED = 10  # km / h
 MINIMUM_TOTAL_TIME = 120  # seconds, can travel a couple edges
 MINIMUM_TOTAL_DISTANCE = 1000  # meters, about a few city blocks
-MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS = 5  # seconds, we need high granularity to make accurate map matches
+MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS = (
+    5  # seconds, we need high granularity to make accurate map matches
+)
 MAXIMUM_SPEED_BETWEEN_ADJACENT_POINTS = 160  # km / h, to weed out poor measurements and trains
-MAXIMUM_POOR_MEASUREMENTS_PERCENT = 0.25  # 25%, max %age of traces that are marked as poor measurements
+MAXIMUM_POOR_MEASUREMENTS_PERCENT = (
+    0.25  # 25%, max %age of traces that are marked as poor measurements
+)
 
 
 def run(trace_data: list[list[dict]]) -> list[list[dict]]:
@@ -32,8 +36,10 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
         speeds = []
 
         # Skip if time spent on sequence isn't long enough
-        if sequence[-1]['time'] - sequence[0]['time'] < MINIMUM_TOTAL_TIME:
-            print('Skipping b/c min time {}'.format(sequence[-1]['time'] - sequence[0]['time']))
+        if sequence[-1]["time"] - sequence[0]["time"] < MINIMUM_TOTAL_TIME:
+            print(
+                "Skipping b/c min time {}".format(sequence[-1]["time"] - sequence[0]["time"])
+            )
             continue
 
         total_dist = 0  # meters
@@ -44,8 +50,16 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
         # A boolean flag that allows us to signal bad sequences from within the following for loop
         should_skip_sequence = False
         for i in range(len(sequence) - 1):
-            from_timestamp, from_lon, from_lat = sequence[i]['time'], sequence[i]['lon'], sequence[i]['lat']
-            to_timestamp, to_lon, to_lat = sequence[i + 1]['time'], sequence[i + 1]['lon'], sequence[i + 1]['lat']
+            from_timestamp, from_lon, from_lat = (
+                sequence[i]["time"],
+                sequence[i]["lon"],
+                sequence[i]["lat"],
+            )
+            to_timestamp, to_lon, to_lat = (
+                sequence[i + 1]["time"],
+                sequence[i + 1]["lon"],
+                sequence[i + 1]["lat"],
+            )
             d = haversine(from_lon, from_lat, to_lon, to_lat)  # Meters
             t = to_timestamp - from_timestamp
 
@@ -53,7 +67,7 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
             # than a previous trace's timestamp, something is wrong with this sequence so we will throw it away to
             # be safe
             if t < 0:
-                print('Skipping b/c min time < 0')
+                print("Skipping b/c min time < 0")
                 should_skip_sequence = True
 
             # Skip calculating speed for this specific trace point if no time elapsed
@@ -74,21 +88,21 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
             speeds.append(v_kmph)
 
         if should_skip_sequence:
-            print('Skipping b/c should skip seq')
+            print("Skipping b/c should skip seq")
             continue
 
         if num_poor_measurements / len(sequence) > MAXIMUM_POOR_MEASUREMENTS_PERCENT:
-            print('Skipping b/c too many latent traces {}'.format(num_poor_measurements))
+            print("Skipping b/c too many latent traces {}".format(num_poor_measurements))
             continue
 
         # Skip if distance traveled on sequence isn't long enough
         if total_dist < MINIMUM_TOTAL_DISTANCE:
-            print('Skipping b/c min total dist {}'.format(total_dist))
+            print("Skipping b/c min total dist {}".format(total_dist))
             continue
 
         # Skip if we feel like the average speed in this sequence isn't fast enough correspond with someone driving
         if np.array(speeds).mean() < MINIMUM_MEAN_SPEED:
-            print('Skipping b/c mean speed {}'.format(np.array(speeds).mean()))
+            print("Skipping b/c mean speed {}".format(np.array(speeds).mean()))
             continue
 
         filtered_trace_data.append(sequence)
