@@ -88,7 +88,7 @@ There is a specific JSON structure that this script outputs. Here is an example:
 ### Quickstart Example
 
 This project uses Python 3.9. The script can be run by setting up a virtualenv, installing modules from 
-`requirements.txt`, and calling the `get_trace_data.py` script.
+`requirements.txt`, and calling the `conflation/main.py` script.
 
 Here is an example setup and run across a wide area in Manhattan NYC, with Mapillary client ID redacted (assuming you 
 have Python 3.9 installed using `python3`):

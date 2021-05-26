@@ -1,3 +1,3 @@
-from .get_trace_data import main
+from .main import main
 
 main()

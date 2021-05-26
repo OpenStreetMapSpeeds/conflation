@@ -5,6 +5,7 @@ import multiprocessing
 import util
 
 from conflation import mapillary
+from conflation import map_matching
 
 
 def main():
@@ -34,7 +35,7 @@ def main():
 
     # Create dirs
     bbox = parsed_args.bbox
-    output_dir, output_tmp_dir = util.initialize_dirs(bbox)
+    traces_dir, tmp_dir, map_matches_dir, results_dir = util.initialize_dirs(bbox)
 
     # Determine source of trace data specified by config
     try:
@@ -46,13 +47,7 @@ def main():
     # Pull and filter trace data
     print("Pulling trace data from API...")
     if config["provider"] == "mapillary":
-        mapillary.run(
-            parsed_args.bbox,
-            output_dir,
-            output_tmp_dir,
-            config,
-            parsed_args.concurrency,
-        )
+        mapillary.run(parsed_args.bbox, traces_dir, tmp_dir, config, parsed_args.concurrency)
     else:
         raise NotImplementedError(
             'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(
@@ -62,7 +57,10 @@ def main():
 
     # TODO: See if introducing a Queue / iterator here makes sense so we can continue next steps while pulling from API
     print("Trace data pulled, map matching...")
-    # map_matching.run(output_dir, parsed_args.concurrency)
+    map_matching.run(traces_dir, map_matches_dir, parsed_args.concurrency)
+
+    print("Map matching complete, aggregating data into final .json output files...")
+    # aggregation.run()
 
     print("Done!")
 
