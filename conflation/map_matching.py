@@ -55,34 +55,33 @@ def run(
 
 
 def initialize_multiprocess(
-    map_matches_dir_: str,
-    valhalla_url_: str,
-    valhalla_headers_: dict,
+    global_map_matches_dir_: str,
+    global_valhalla_url_: str,
+    global_valhalla_headers_: dict,
     finished_bbox_sections_: multiprocessing.Value,
 ) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess map matching requests.
     """
 
-    global map_matches_dir
-    map_matches_dir = map_matches_dir_
+    global global_map_matches_dir
+    global_map_matches_dir = global_map_matches_dir_
 
     # Integer counter of num of finished bbox_sections
     global finished_bbox_sections
     finished_bbox_sections = finished_bbox_sections_
 
     # Valhalla base url and headers
-    global valhalla_url
-    valhalla_url = valhalla_url_
-    global valhalla_headers
-    valhalla_headers = valhalla_headers_
+    global global_valhalla_url
+    global_valhalla_url = global_valhalla_url_
+    global global_valhalla_headers
+    global_valhalla_headers = global_valhalla_headers_
 
 
 def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
     try:
         bbox, trace_filename = bbox_section
         processed_trace_filename = util.get_processed_trace_filename(trace_filename)
-        print(bbox, trace_filename, processed_trace_filename)
 
         # Check to see if the trace has already been processed by map_matching.
         if os.path.exists(processed_trace_filename):
@@ -92,12 +91,10 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
             return
 
         trace_data: list[list[dict]] = pickle.load(open(trace_filename, "rb"))
-        for traces in trace_data:
-            results = map_match(traces)
-            if len(results) == 0:
-                continue
-
-            write_results(map_matches_dir, results)
+        map_matches = {}
+        [add_map_matches_for_shape(map_matches, shape) for shape in trace_data]
+        if len(map_matches):
+            write_map_matches(global_map_matches_dir, map_matches)
 
         # Once all results have been written, mark the file as processed by renaming.
         os.rename(trace_filename, processed_trace_filename)
@@ -107,22 +104,24 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
         print("ERROR: Failed to pull trace data: {}".format(repr(e)))
 
 
-def map_match(shape: any) -> dict[str, dict[str, list[tuple]]]:
+def add_map_matches_for_shape(
+    map_matches: dict[str, dict[str, list[tuple]]], shape: any
+) -> None:
     body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
 
     # print(repr(body))
 
     resp = requests.post(
-        valhalla_url + VALHALLA_MAP_MATCHING_URL_EXTENSION, json=body, headers=valhalla_headers
+        global_valhalla_url + VALHALLA_MAP_MATCHING_URL_EXTENSION,
+        json=body,
+        headers=global_valhalla_headers,
     )
     resp = resp.json()
     # print(resp)
 
-    results = {}
-
     if has_too_many_unmatched(resp["matched_points"]):
         print("Skipping b/c too many points unmatched")
-        return {}
+        return
 
     prev_t = resp["edges"][0]["end_node"]["elapsed_time"]
     # TODO: Figure out the funky math for the first and last edges
@@ -138,7 +137,7 @@ def map_match(shape: any) -> dict[str, dict[str, list[tuple]]]:
         # The elapsed time should be monotonically increasing. If not, this is a bad match and we will skip it
         if t < prev_t:
             print("Skipping b/c time not monotonically increasing {} -> {}".format(prev_t, t))
-            return {}
+            return
         # If the elapsed time doesn't increase for some reason, we can't make any measurement here, so we will ignore it
         if t == prev_t:
             # json.dumps([{'lon': b['lon'], 'lat': b['lat'], 'type': b['type'], 'time': i} for i, b in
@@ -147,19 +146,15 @@ def map_match(shape: any) -> dict[str, dict[str, list[tuple]]]:
 
         kph = way_length / t_elapsed_on_way * 3600
         # Ordered tuple that holds all the information that we need to classify this edge, as well as the speed
-        # calculated TODO: Add a few more cols here depending on what we need
-
-        # TODO: Motorway ramp ->
+        # calculated.
         edge_data = (classify_density(density_value), road_class, get_type_for_edge(e), kph)
-        add_trace_to_result(results, country, region, edge_data)
+        add_data_to_map_matches(map_matches, country, region, edge_data)
 
         prev_t = t
 
-    return results
 
-
-def write_results(map_matches_dir: str, results: dict[str, dict[str, list[tuple]]]):
-    for country, regions in results.items():
+def write_map_matches(map_matches_dir: str, map_matches: dict[str, dict[str, list[tuple]]]):
+    for country, regions in map_matches.items():
         country_dir = os.path.join(map_matches_dir, country)
         # Make the dir if it does not exist yet
         if not os.path.exists(country_dir):
@@ -174,7 +169,11 @@ def write_results(map_matches_dir: str, results: dict[str, dict[str, list[tuple]
                 )
                 pickle.dump(existing_rows, open(region_filename, "wb"))
             except (OSError, IOError):
-                print("Creating region .pickle file for {}/{}...".format(country, region))
+                print(
+                    "Creating region .pickle file for {}/{} Len: {}...".format(
+                        country, region, len(new_rows)
+                    )
+                )
                 pickle.dump(new_rows, open(region_filename, "wb"))
 
 
@@ -217,14 +216,15 @@ def classify_density(density: float) -> str:
         return DENSITY_CLASSIFICATIONS[2]
 
 
-def add_trace_to_result(results: any, country: str, region: str, data: tuple) -> any:
-    if country not in results:
-        results[country] = {}
-    if region not in results[country]:
-        results[country][region] = [data]
+def add_data_to_map_matches(
+    map_matches: dict[str, dict[str, list[tuple]]], country: str, region: str, data: tuple
+) -> None:
+    if country not in map_matches:
+        map_matches[country] = {}
+    if region not in map_matches[country]:
+        map_matches[country][region] = [data]
     else:
-        results[country][region].append(data)
-    return results
+        map_matches[country][region].append(data)
 
 
 def has_too_many_unmatched(matched_points: list[any]) -> bool:
