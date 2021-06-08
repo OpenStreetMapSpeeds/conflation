@@ -4,8 +4,7 @@ import json
 import multiprocessing
 import util
 
-from conflation import mapillary
-from conflation import map_matching
+from conflation import mapillary, map_matching
 
 
 def main():
@@ -29,6 +28,20 @@ def main():
         help="The number of processes to use to make requests, by default your # of cpus",
         default=multiprocessing.cpu_count(),
     )
+    arg_parser.add_argument(
+        "--valhalla_url",
+        type=str,
+        help="Base URL for an active Valhalla service",
+        required=True,
+    )
+    arg_parser.add_argument(
+        "--valhalla_headers",
+        type=str,
+        help="Additional http headers to send with the requests. Follows the http header spec, eg. some-header-name: some-header-value",
+        action="append",
+        nargs="*",
+    )
+
     # TODO: Change print() to use logger and add logging level as arg
 
     parsed_args = arg_parser.parse_args()
@@ -57,10 +70,26 @@ def main():
 
     # TODO: See if introducing a Queue / iterator here makes sense so we can continue next steps while pulling from API
     print("Trace data pulled, map matching...")
-    map_matching.run(traces_dir, map_matches_dir, parsed_args.concurrency)
+    # Pulling Valhalla headers from args
+    valhalla_headers = {
+        k: v for k, v in [h.split(": ") for hs in parsed_args.valhalla_headers for h in hs]
+    }
+    map_matching.run(
+        traces_dir,
+        map_matches_dir,
+        parsed_args.concurrency,
+        parsed_args.valhalla_url,
+        valhalla_headers,
+    )
 
+    # Next step: directories grouped by country, files grouped by region, files will be .pickles of lists where
+    # each row is a per-edge measurement
     print("Map matching complete, aggregating data into final .json output files...")
-    # aggregation.run()
+    # aggregation.run(
+    #     map_matches_dir,
+    #     results_dir,
+    #     parsed_args.concurrency,
+    # )
 
     print("Done!")
 

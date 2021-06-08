@@ -7,8 +7,7 @@ from dateutil import parser
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
-from conflation import util
-from conflation import trace_filter
+from conflation import util, trace_filter
 
 SEQUENCES_PER_PAGE_DEFAULT = 10  # How many sequences to receive on each page of the API call
 IMAGES_PER_PAGE_DEFAULT = 1000  # How many images to receive on each page of the API call
@@ -120,9 +119,12 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
         should be stored)
     """
     try:
-        bbox, result_filename = bbox_section
+        bbox, trace_filename = bbox_section
+        processed_trace_filename = util.get_processed_trace_filename(trace_filename)
 
-        if os.path.exists(result_filename):
+        # If either we have already pulled trace data to disk, or if it's been pulled AND processed by map_matching,
+        # don't pull it again.
+        if os.path.exists(trace_filename) or os.path.exists(processed_trace_filename):
             print("Seq already exists on disk for bbox={}. Skipping...".format(bbox))
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
@@ -140,7 +142,7 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
         # to the real location
         temp_filename = os.path.join(global_tmp_dir, bbox + ".pickle")
         pickle.dump(trace_data, open(temp_filename, "wb"))
-        os.rename(temp_filename, result_filename)
+        os.rename(temp_filename, trace_filename)
 
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
