@@ -30,7 +30,7 @@ def run(
         bbox_sections: list[tuple[str, str]] = pickle.load(open(sections_filename, "rb"))
     except (OSError, IOError):
         raise FileNotFoundError(
-            "bbox sections pickle not found in output folder. Cannot perform map matching."
+            "bbox sections pickle could not be loaded from /output/traces. Cannot perform map matching."
         )
 
     finished_bbox_sections = multiprocessing.Value("i", 0)
@@ -41,7 +41,6 @@ def run(
     ) as pool:
         result = pool.map_async(map_match_for_bbox, bbox_sections)
 
-        print("Placing {} results in {}...".format(len(bbox_sections), traces_dir))
         progress = 0
         increment = 5
         while not result.ready():
@@ -83,7 +82,7 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
         bbox, trace_filename = bbox_section
         processed_trace_filename = util.get_processed_trace_filename(trace_filename)
 
-        # Check to see if the trace has already been processed by map_matching.
+        # Check to see if the trace has already been processed by map_matching
         if os.path.exists(processed_trace_filename):
             print("Map matching already complete for bbox={}. Skipping...".format(bbox))
             with finished_bbox_sections.get_lock():
@@ -96,12 +95,12 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
         if len(map_matches):
             write_map_matches(global_map_matches_dir, map_matches)
 
-        # Once all results have been written, mark the file as processed by renaming.
+        # Once all results have been written, mark the file as processed by renaming
         os.rename(trace_filename, processed_trace_filename)
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
     except Exception as e:
-        print("ERROR: Failed to pull trace data: {}".format(repr(e)))
+        print("ERROR: Failed to map match using Valhalla: {}".format(repr(e)))
 
 
 def add_map_matches_for_shape(
@@ -109,19 +108,24 @@ def add_map_matches_for_shape(
 ) -> None:
     body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
 
-    # print(repr(body))
-
     resp = requests.post(
         global_valhalla_url + VALHALLA_MAP_MATCHING_URL_EXTENSION,
         json=body,
         headers=global_valhalla_headers,
     )
     resp = resp.json()
-    # print(resp)
 
-    if has_too_many_unmatched(resp["matched_points"]):
-        print("Skipping b/c too many points unmatched")
-        return
+    #
+    try:
+        if has_too_many_unmatched(resp["matched_points"]):
+            print("Skipping b/c too many points unmatched")
+            return
+    except KeyError:
+        raise ConnectionError(
+            "Response from Valhalla /{} malformed. Possible connection issue to Valhalla? {}".format(
+                VALHALLA_MAP_MATCHING_URL_EXTENSION, resp
+            )
+        )
 
     prev_t = resp["edges"][0]["end_node"]["elapsed_time"]
     # TODO: Figure out the funky math for the first and last edges
@@ -146,7 +150,7 @@ def add_map_matches_for_shape(
 
         kph = way_length / t_elapsed_on_way * 3600
         # Ordered tuple that holds all the information that we need to classify this edge, as well as the speed
-        # calculated.
+        # calculated. See aggregation.MAP_MATCH_COLS for the meaning of each column
         edge_data = (classify_density(density_value), road_class, get_type_for_edge(e), kph)
         add_data_to_map_matches(map_matches, country, region, edge_data)
 

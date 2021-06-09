@@ -10,6 +10,7 @@ MAP_MATCH_DIR = "map_matches"
 RESULTS_DIR = "results"
 SECTIONS_PICKLE_FILENAME = "sections.pickle"
 PROCESSED_TRACE_EXTENSION = ".processed"
+FINAL_RESULTS_FILENAME = "config.json"
 MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 
 
@@ -67,6 +68,13 @@ def get_processed_trace_filename(trace_filename: str) -> str:
     return trace_filename + PROCESSED_TRACE_EXTENSION
 
 
+def get_final_config_filename(results_dir: str) -> str:
+    """
+    Returns the full filename of where the final config JSON should be stored.
+    """
+    return os.path.join(results_dir, FINAL_RESULTS_FILENAME)
+
+
 def split_bbox(
     traces_dir: str,
     bbox: str,
@@ -94,6 +102,12 @@ def split_bbox(
     except (OSError, IOError):
         print("bbox_sections pickle not found. Creating and writing to disk...")
         min_long, min_lat, max_long, max_lat = [float(s) for s in bbox.split(",")]
+        # Small sanity checks
+        if max_long <= min_long or max_lat <= min_lat:
+            raise ValueError(
+                "Bounding box {} not well defined. Must be in the format `min_longitude,min_latitude,max_longitude,"
+                "max_latitude`.".format(bbox)
+            )
 
         # Perform a check to see how many sections would be generated
         num_files = int(

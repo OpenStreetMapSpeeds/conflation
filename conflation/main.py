@@ -85,11 +85,7 @@ def main():
     # Next step: directories grouped by country, files grouped by region, files will be .pickles of lists where
     # each row is a per-edge measurement
     print("Map matching complete, aggregating data into final .json output files...")
-    aggregation.run(
-        map_matches_dir,
-        results_dir,
-        parsed_args.concurrency,
-    )
+    aggregation.run(map_matches_dir, results_dir)
 
     print("Done!")
 
