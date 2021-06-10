@@ -145,19 +145,19 @@ def add_map_matches_for_shape(
         json=body,
         headers=global_valhalla_headers,
     )
-    resp = resp.json()
 
-    #
-    try:
-        if has_too_many_unmatched(resp["matched_points"]):
-            print("Skipping b/c too many points unmatched")
-            return
-    except KeyError:
+    if resp.status_code != 200:
         raise ConnectionError(
-            "Response from Valhalla /{} malformed. Possible connection issue to Valhalla? {}".format(
-                VALHALLA_MAP_MATCHING_URL_EXTENSION, resp
+            "Error connecting to Valhalla: Status {} Resp {}".format(
+                resp.status_code, resp.json()
             )
         )
+
+    resp = resp.json()
+
+    if has_too_many_unmatched(resp["matched_points"]):
+        print("Skipping b/c too many points unmatched")
+        return
 
     prev_t = resp["edges"][0]["end_node"]["elapsed_time"]
     # TODO: Figure out the funky math for the first and last edges
