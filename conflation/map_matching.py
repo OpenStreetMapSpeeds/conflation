@@ -9,6 +9,7 @@ VALHALLA_MAP_MATCHING_URL_EXTENSION = "trace_attributes"
 MAXIMUM_UNMATCHED_PERCENTAGE = (
     0.25  # If more than 25% of points are unmatched, skip this sequence
 )
+MAXIMUM_SPEED = 160  # km / h, to weed out poor measurements and trains
 DENSITY_CLASSIFICATIONS = [  # The different density classifications we can give to roads
     "rural",
     "suburban",
@@ -23,6 +24,21 @@ def run(
     valhalla_url: str,
     valhalla_headers: dict,
 ) -> None:
+    """
+    This method is the second step in the script. It takes the traces from the first step and performs "map matching",
+    which is the process of determining which real-life roads the GPS traces map to. We use the open source Valhalla
+    service to do the map matching, and these results allow us to determine the speed the traces were taken at, as well
+    as the specific road that the trace was taken on.
+
+    The map matching process happens in a multi-processed format, and this method initializes the threads and tracks the
+    overall progress.
+
+    :param traces_dir: Dir where trace data from step 1 was pickled to
+    :param map_matches_dir: Dir where map match results will be pickled to
+    :param processes: Number of threads to use
+    :param valhalla_url: Base URL for Valhalla that should be called
+    :param valhalla_headers: Optional dict of headers to pass into each Valhalla call
+    """
     sections_filename = util.get_sections_filename(traces_dir)
 
     try:
@@ -78,6 +94,14 @@ def initialize_multiprocess(
 
 
 def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
+    """
+    Performs map matching for a given bbox section. It pulls the bbox section's traces from the previous steps by
+    finding it on the filesystem. For each sequence in the traces, it passes it to add_map_matches_for_shape to make the
+    actual Valhalla call. Map matching results are propagated to disk with write_map_matches and the original traces
+    pickle is renamed as a checkpoint.
+
+    :param bbox_section: From util.split_bbox, used in previous step
+    """
     try:
         bbox, trace_filename = bbox_section
         processed_trace_filename = util.get_processed_trace_filename(trace_filename)
@@ -106,6 +130,14 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
 def add_map_matches_for_shape(
     map_matches: dict[str, dict[str, list[tuple]]], shape: any
 ) -> None:
+    """
+    Calls Valhalla API with the given shape dict and adds the map matching results to map_matches in place. Does some
+    filtering for bad map matches if there are too many unmatched points or if the elapsed time isn't monotonically
+    increasing.
+
+    :param map_matches: Dict of already existing map matches
+    :param shape: "Shape" object that is passed into Valhalla's APIs. See Valhalla's README for more specifications
+    """
     body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
 
     resp = requests.post(
@@ -149,6 +181,12 @@ def add_map_matches_for_shape(
             continue
 
         kph = way_length / t_elapsed_on_way * 3600
+
+        # Skip measurements that are going too fast
+        if kph > MAXIMUM_SPEED:
+            print("Skipping b/c kph of {} > limit of {}".format(kph, MAXIMUM_SPEED))
+            return
+
         # Ordered tuple that holds all the information that we need to classify this edge, as well as the speed
         # calculated. See aggregation.MAP_MATCH_COLS for the meaning of each column
         edge_data = (classify_density(density_value), road_class, get_type_for_edge(e), kph)
@@ -157,7 +195,14 @@ def add_map_matches_for_shape(
         prev_t = t
 
 
-def write_map_matches(map_matches_dir: str, map_matches: dict[str, dict[str, list[tuple]]]):
+def write_map_matches(
+    map_matches_dir: str, map_matches: dict[str, dict[str, list[tuple]]]
+) -> None:
+    """
+    Writes the results from map_matches to disk. Follows a format where each config is located in a dir corresponding to
+    the the iso3166-1 spec, and has a filename corresponding to the iso3166-2 spec.
+    """
+
     for country, regions in map_matches.items():
         country_dir = os.path.join(map_matches_dir, country)
         # Make the dir if it does not exist yet
@@ -182,6 +227,9 @@ def write_map_matches(map_matches_dir: str, map_matches: dict[str, dict[str, lis
 
 
 def get_type_for_edge(edge: any) -> str:
+    """
+    For a Valhalla edge object, determine the 'type' of it, which is used in the final config.
+    """
     # 4 special uses
     uses = {
         "driveway": "driveway",
@@ -208,9 +256,9 @@ def get_type_for_edge(edge: any) -> str:
 
 def classify_density(density: float) -> str:
     """
-    TODO
-    :param density: Density value from Valhalla edge response
-    :return: One of the values in DENSITY_CLASSIFICATIONS
+    Given the density value from a Valhalla edge, determine which density it corresponds with, out of the options in
+    DENSITY_CLASSIFICATIONS. Currently assumes that DENSITY_CLASSIFICATIONS has 3 elements ordered from lease dense to
+    most.
     """
     if density < 5:
         return DENSITY_CLASSIFICATIONS[0]
@@ -223,6 +271,10 @@ def classify_density(density: float) -> str:
 def add_data_to_map_matches(
     map_matches: dict[str, dict[str, list[tuple]]], country: str, region: str, data: tuple
 ) -> None:
+    """
+    Helper function to add a new measurement to the existing map_matches dict. Follows a country -> region -> [speeds]
+    hierarchy.
+    """
     if country not in map_matches:
         map_matches[country] = {}
     if region not in map_matches[country]:

@@ -7,6 +7,7 @@ import pickle
 from mapillary import util
 
 MAP_MATCH_COLS = ["density", "road_class", "type", "kph"]
+# Basic config from OpenStreetMapSpeeds/schema repo where all values are None.
 BASE_CONFIG = {
     "rural": {
         "way": [None, None, None, None, None, None, None, None],
@@ -52,6 +53,18 @@ ROAD_CLASS_INDEX_MAPPING = {
 
 
 def run(map_matches_dir: str, results_dir: str) -> None:
+    """
+    This is the final step of the script, where the map matching results from step two are aggregated together to build
+    the config.json that acts as the output of the script. The config.json follows the definition from the
+    OpenStreetMapSpeeds/schema repo.
+
+    It does a walk through the output dirs of the map matching process. Each file in these dirs holds a list of tuples
+    that contain each individual measurement we made during map matching (kind of like database tables). The data is
+    aggregated together with a group_by using pandas.
+
+    :param map_matches_dir: Dir where map match results from step 2 were pickled to
+    :param results_dir: Dir where the final config.json should be stored
+    """
     # Check to see if the final result has already been processed
     final_config_filename = util.get_final_config_filename(results_dir)
     if os.path.exists(final_config_filename):
