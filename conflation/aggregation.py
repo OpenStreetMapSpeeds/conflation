@@ -3,12 +3,16 @@ import json
 import os
 import pandas as pd
 import pickle
+import re
+from typing import Optional
 
-from mapillary import util
+from conflation import util
 
 MAP_MATCH_COLS = ["density", "road_class", "type", "kph"]
 # Basic config from OpenStreetMapSpeeds/schema repo where all values are None.
 BASE_CONFIG = {
+    "iso3166-1": None,
+    "iso3166-2": None,
     "rural": {
         "way": [None, None, None, None, None, None, None, None],
         "link_exiting": [None, None, None, None, None],
@@ -48,7 +52,7 @@ ROAD_CLASS_INDEX_MAPPING = {
     "tertiary": 4,
     "unclassified": 5,
     "residential": 6,
-    "service_other": 7,
+    "service": 7,
 }
 
 
@@ -72,24 +76,40 @@ def run(map_matches_dir: str, results_dir: str) -> None:
         return
 
     final_config = []
-    for subdir, dirs, files in os.walk(map_matches_dir):
-        for file in files:
-            # Pull the country and region using the name of the subdir and the pickle file
-            country = os.path.basename(os.path.normpath(subdir))
-            region = file.split(".")[0]
+    for subdir, dirs, files in os.walk(map_matches_dir):  # Iterating over countries
+        # Pull the country using the name of the subdir
+        country = os.path.basename(os.path.normpath(subdir))
+        regions = {}
+        country_level_data = []
+
+        for file in files:  # Iterating over regions
+            # Pull the region using the pickle filename
+            region = file.split(".")[0].split(util.MAP_MATCH_REGION_FILENAME_DELIMITER)[0]
 
             # Pull map matches from disk
-            map_matches_filename = os.path.join(subdir, file)
+            map_match_data_filename = os.path.join(subdir, file)
             try:
-                print("Reading {}/{} map match results from disk...".format(country, region))
-                map_matches: dict[str, dict[str, list[tuple]]] = pickle.load(
-                    open(map_matches_filename, "rb")
+                print(
+                    "Reading {}/{} map match results from file {}".format(
+                        country, region, map_match_data_filename
+                    )
                 )
+                map_match_data: list[tuple] = pickle.load(open(map_match_data_filename, "rb"))
             except (OSError, IOError):
                 print("ERROR: {} pickle could not be loaded. Cannot perform aggregation.")
                 continue
 
-            df = pd.DataFrame(map_matches, columns=MAP_MATCH_COLS)
+            # Combine the data with other data from the same region
+            if region not in regions:
+                regions[region] = map_match_data
+            else:
+                regions[region].extend(map_match_data)
+
+            # Aggregate country level statistics
+            country_level_data.extend(map_match_data)
+
+        for region, data in regions.items():
+            df = pd.DataFrame(data, columns=MAP_MATCH_COLS)
 
             # TODO: For now we're just doing a simple median over the data. Do we need something fancier?
             final_config.append(
@@ -98,20 +118,50 @@ def run(map_matches_dir: str, results_dir: str) -> None:
                 )
             )
 
+        if len(country_level_data):
+            # Aggregate country level statistics
+            df = pd.DataFrame(country_level_data, columns=MAP_MATCH_COLS)
+
+            final_config.append(
+                measurements_to_config(df.groupby(MAP_MATCH_COLS[:-1]).median(), country, None)
+            )
+
+    # TODO: Do the same aggregation at the world level. Probably need to implement another pandas DF that holds data
+    #   for each country, then at the end (here) we can do a weighted group by
+
+    if len(final_config) == 0:  # No data from map match, assume that something went wrong
+        return
+
+    # Dump the config dict to a string, then run some regex to make the format more concise.
+    final_config_str = json.dumps(final_config)
+    p = re.compile('("rural|"suburban|"urban|"iso3166)')
+    final_config_str = p.sub(os.linesep + r"    \1", final_config_str)
+    p = re.compile('("way|"link|"round|"driveway)')
+    final_config_str = p.sub(os.linesep + r"      \1", final_config_str)
+    p = re.compile(", {")
+    final_config_str = p.sub(r"," + os.linesep + "  {", final_config_str)
+    p = re.compile("\\[{")
+    final_config_str = p.sub(r"[" + os.linesep + "  {", final_config_str)
+    p = re.compile("}]")
+    final_config_str = p.sub(r"}" + os.linesep + "]", final_config_str)
+
     with open(final_config_filename, "w") as f:
-        f.write(json.dumps(final_config, indent=4))
+        f.write(final_config_str)
 
 
-def measurements_to_config(df: pd.DataFrame, country: str, region: str) -> dict:
+def measurements_to_config(
+    df: pd.DataFrame, country: Optional[str], principal_subdivision: Optional[str]
+) -> dict:
     """
     This function builds the final ETA estimates config that is defined in the OpenStreetMapSpeeds/schema repo. It takes
-    the basic config from BASE_CONFIG and fills in any data that it can gather from df. The country and region can be
-    optionally specified. See the .README of the OpenStreetMapSpeeds/schema repo for more details.
+    the basic config from BASE_CONFIG and fills in any data that it can gather from df. The country and
+    principal_subdivision can be optionally specified. See the .README of the OpenStreetMapSpeeds/schema repo for more
+    details.
 
     :param df: DataFrame of the results, where each series has a key of (density, road_class, type) and a value of just
         the speed measurement in kph
     :param country: Optional iso3166-1, can pass in None
-    :param region: Optional iso3166-2, can pass in None
+    :param principal_subdivision: Optional iso3166-2, can pass in None
     :return: The config in JSON format as defined in the OpenStreetMapSpeeds/schema repo
     """
 
@@ -119,12 +169,17 @@ def measurements_to_config(df: pd.DataFrame, country: str, region: str) -> dict:
 
     if country:
         config["iso3166-1"] = country
-    if region:
-        config["iso3166-2"] = region
+    else:
+        del config["iso3166-1"]
+    if principal_subdivision:
+        config["iso3166-2"] = principal_subdivision
+    else:
+        del config["iso3166-2"]
 
     for idx, kph in df.iterrows():
         density, road_class, type_ = idx
-        kph = kph[0]
+        # Round the kph to the nearest whole number, any sig figs is just noise.
+        kph = round(kph[0])
 
         # Process all the different types
         if type_ in ["way", "roundabout"]:

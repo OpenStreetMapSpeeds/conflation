@@ -1,16 +1,19 @@
 import datetime
-import requests
+import multiprocessing
 import os
 import pickle
-import multiprocessing
+import requests
 from dateutil import parser
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 from conflation import util, trace_filter
 
-SEQUENCES_PER_PAGE_DEFAULT = 10  # How many sequences to receive on each page of the API call
+SEQUENCES_PER_PAGE_DEFAULT = 25  # How many sequences to receive on each page of the API call
 IMAGES_PER_PAGE_DEFAULT = 1000  # How many images to receive on each page of the API call
+MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # How many sequences to process for each bbox section
+    500
+)
 SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to a year old
     datetime.date.today() - datetime.timedelta(days=365)
 ).isoformat()
@@ -21,7 +24,7 @@ SEQUENCE_URL = "https://a.mapillary.com/v3/sequences_without_images?client_id={}
 IMAGES_URL = "https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}&per_page={}"
 
 
-def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) -> None:
+def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) -> int:
     """
     Entrypoint for pulling trace date from Mapillary APIs. Will pull all trace data in the given bbox and store it in
     the traces_dir, using the number of processes specified and any conf values from the `config` JSON.
@@ -29,12 +32,12 @@ def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) 
     :param bbox: Bounding box we are searching over, in the format of 'min_lon,min_lat,max_lon,max_lat'
     :param traces_dir: Dir where trace data will be pickled to
     :param tmp_dir: Dir where temp output files will be stored (should be empty upon completion)
-    :param config: Dict of configs, see the conf param of make_trace_data_requests()
+    :param config: Dict of configs, see the .README or the conf param of make_trace_data_requests()
     :param processes: Number of threads to use
     """
     # Do a quick check to see if user specified the mandatory 'client_id' in config JSON
     if "client_id" not in config:
-        raise KeyError('Missing "client_id" (Mapillary Client ID) key in --config JSON.')
+        raise KeyError('Missing "client_id" (Mapillary Client ID) key in --trace-config JSON.')
 
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = util.split_bbox(traces_dir, bbox, to_bbox)
@@ -60,6 +63,7 @@ def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) 
             print("Current progress: 100%")
 
         # TODO: Delete the tmp dir after run?
+        return 1
 
 
 def to_bbox(llo: float, lla: float, mlo: float, mla: float) -> str:
@@ -79,7 +83,7 @@ def is_within_bbox(lon: float, lat: float, bbox: list[float]) -> bool:
 
 def initialize_multiprocess(
     global_tmp_dir_: str,
-    global_config_: any,
+    global_config_: dict,
     finished_bbox_sections_: multiprocessing.Value,
 ) -> None:
     """
@@ -184,6 +188,11 @@ def make_trace_data_requests(
         if "skip_if_fewer_images_than" in conf
         else SKIP_IF_FEWER_IMAGES_THAN_DEFAULT
     )
+    max_sequences_per_bbox_section = (
+        conf["max_sequences_per_bbox_section"]
+        if "max_sequences_per_bbox_section" in conf
+        else MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT
+    )
     start_date = conf["start_date"] if "start_date" in conf else SEQUENCE_START_DATE_DEFAULT
 
     # Paginate sequences within this bbox
@@ -196,6 +205,15 @@ def make_trace_data_requests(
         seq_ids = []
         for seq_f in seq_resp.json()["features"]:
             seq_id = seq_f["properties"]["key"]
+
+            # If we've already processed this seq_id before, skip it, otherwise we will be writing duplicate image data
+            if seq_id in sequences_by_id:
+                print(
+                    "@@@ MAPILLARY: Skipping seq_id={} b/c we've already seen it on a previous page".format(
+                        seq_id
+                    )
+                )
+                continue
 
             # Only process sequences that originated from this bbox. This prevents us from processing sequences twice
             origin_lon, origin_lat = seq_f["geometry"]["coordinates"][0]
@@ -238,6 +256,15 @@ def make_trace_data_requests(
                     img_resp.links["next"]["url"] if "next" in img_resp.links else None
                 )
                 img_page += 1
+
+        # Already collected enough sequences. Move onto the next bbox section
+        if len(sequences_by_id) > max_sequences_per_bbox_section:
+            print(
+                "## Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}. Continuing...".format(
+                    len(sequences_by_id), max_sequences_per_bbox_section
+                )
+            )
+            break
 
         # Check if there is a next sequence page or if we are finished with this bbox
         seq_next_url = seq_resp.links["next"]["url"] if "next" in seq_resp.links else None

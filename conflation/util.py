@@ -1,6 +1,7 @@
 import hashlib
 import os
 import pickle
+import uuid
 from typing import Callable
 
 OUTPUT_DIR = "output"
@@ -11,6 +12,7 @@ RESULTS_DIR = "results"
 SECTIONS_PICKLE_FILENAME = "sections.pickle"
 PROCESSED_TRACE_EXTENSION = ".processed"
 FINAL_RESULTS_FILENAME = "config.json"
+MAP_MATCH_REGION_FILENAME_DELIMITER = "-"
 MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 
 
@@ -63,7 +65,7 @@ def get_sections_filename(traces_dir_: str) -> str:
 
 def get_processed_trace_filename(trace_filename: str) -> str:
     """
-    Returns the full filename of the trace pickle, if it has already been processed by map_matching.py.
+    Returns the full filename of the trace pickle, if it has already been processed by a map matching script.
     """
     return trace_filename + PROCESSED_TRACE_EXTENSION
 
@@ -73,6 +75,17 @@ def get_final_config_filename(results_dir: str) -> str:
     Returns the full filename of where the final config JSON should be stored.
     """
     return os.path.join(results_dir, FINAL_RESULTS_FILENAME)
+
+
+def get_map_match_region_filename_with_identifier(country_dir: str, region: str) -> str:
+    """
+    To prevent file collision issues during the multiprocess map matching, add a unique identifier to the filename for
+    where map match results should be written given a specific country_dir and region.
+    """
+    return os.path.join(
+        country_dir,
+        region + MAP_MATCH_REGION_FILENAME_DELIMITER + str(uuid.uuid4())[:8] + ".pickle",
+    )
 
 
 def split_bbox(

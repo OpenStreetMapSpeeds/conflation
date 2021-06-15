@@ -2,6 +2,7 @@ import multiprocessing
 import os
 import pickle
 import requests
+
 from conflation import util
 
 VALHALLA_MAP_MATCHING_URL_EXTENSION = "trace_attributes"
@@ -17,13 +18,7 @@ DENSITY_CLASSIFICATIONS = [  # The different density classifications we can give
 ]
 
 
-def run(
-    traces_dir: str,
-    map_matches_dir: str,
-    processes: int,
-    valhalla_url: str,
-    valhalla_headers: dict,
-) -> None:
+def run(traces_dir: str, map_matches_dir: str, processes: int, config: dict) -> None:
     """
     This method is the second step in the script. It takes the traces from the first step and performs "map matching",
     which is the process of determining which real-life roads the GPS traces map to. We use the open source Valhalla
@@ -36,10 +31,15 @@ def run(
     :param traces_dir: Dir where trace data from step 1 was pickled to
     :param map_matches_dir: Dir where map match results will be pickled to
     :param processes: Number of threads to use
-    :param valhalla_url: Base URL for Valhalla that should be called
-    :param valhalla_headers: Optional dict of headers to pass into each Valhalla call
+    :param config: Dict of configs, see the .README or the conf param of add_map_matches_for_shape()
     """
     sections_filename = util.get_sections_filename(traces_dir)
+
+    # Do a quick check to see if user specified the mandatory 'base_url' in config JSON
+    if "base_url" not in config:
+        raise KeyError(
+            'Missing "base_url" (Mapillary Client ID) key in --map-matching-config JSON.'
+        )
 
     try:
         print("Reading bbox_sections from disk...")
@@ -52,7 +52,7 @@ def run(
     finished_bbox_sections = multiprocessing.Value("i", 0)
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
-        initargs=(map_matches_dir, valhalla_url, valhalla_headers, finished_bbox_sections),
+        initargs=(map_matches_dir, config, finished_bbox_sections),
         processes=processes,
     ) as pool:
         result = pool.map_async(map_match_for_bbox, bbox_sections)
@@ -71,8 +71,7 @@ def run(
 
 def initialize_multiprocess(
     global_map_matches_dir_: str,
-    global_valhalla_url_: str,
-    global_valhalla_headers_: dict,
+    global_config_: dict,
     finished_bbox_sections_: multiprocessing.Value,
 ) -> None:
     """
@@ -86,11 +85,9 @@ def initialize_multiprocess(
     global finished_bbox_sections
     finished_bbox_sections = finished_bbox_sections_
 
-    # Valhalla base url and headers
-    global global_valhalla_url
-    global_valhalla_url = global_valhalla_url_
-    global global_valhalla_headers
-    global_valhalla_headers = global_valhalla_headers_
+    # So each process knows the conf provided
+    global global_config
+    global_config = global_config_
 
 
 def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
@@ -115,7 +112,7 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
 
         trace_data: list[list[dict]] = pickle.load(open(trace_filename, "rb"))
         map_matches = {}
-        [add_map_matches_for_shape(map_matches, shape) for shape in trace_data]
+        [add_map_matches_for_shape(map_matches, shape, global_config) for shape in trace_data]
         if len(map_matches):
             write_map_matches(global_map_matches_dir, map_matches)
 
@@ -128,7 +125,7 @@ def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
 
 
 def add_map_matches_for_shape(
-    map_matches: dict[str, dict[str, list[tuple]]], shape: any
+    map_matches: dict[str, dict[str, list[tuple]]], shape: any, conf: dict
 ) -> None:
     """
     Calls Valhalla API with the given shape dict and adds the map matching results to map_matches in place. Does some
@@ -137,16 +134,26 @@ def add_map_matches_for_shape(
 
     :param map_matches: Dict of already existing map matches
     :param shape: "Shape" object that is passed into Valhalla's APIs. See Valhalla's README for more specifications
+    :param conf: Dict of configs. Mandatory keys are ['base_url']. Optional keys are ['headers']
     """
     body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
+    base_url = conf["base_url"]
+    headers = conf["headers"] if "headers" in conf else None
 
     resp = requests.post(
-        global_valhalla_url + VALHALLA_MAP_MATCHING_URL_EXTENSION,
+        base_url + VALHALLA_MAP_MATCHING_URL_EXTENSION,
         json=body,
-        headers=global_valhalla_headers,
+        headers=headers,
     )
 
     if resp.status_code != 200:
+        # 400 Error code from Valhalla simply means that a match could not be made. This is fine, we'll just skip the
+        # sequence.
+        if resp.status_code == 400:
+            print("Skipping b/c 400 response from Valhalla: {}".format(resp.json()))
+            return
+
+        # Any other status code and we want to report an error.
         raise ConnectionError(
             "Error connecting to Valhalla: Status {} Resp {}".format(
                 resp.status_code, resp.json()
@@ -166,7 +173,8 @@ def add_map_matches_for_shape(
         density_value = e["density"]
         admin = resp["admins"][e["end_node"]["admin_index"]]
         country, region = admin["country_code"], admin["state_code"]
-        road_class = e["road_class"]
+        # OSM name for the service road class is "service", whereas Valhalla outputs "service_other"
+        road_class = e["road_class"] if e["road_class"] != "service_other" else "service"
         t = e["end_node"]["elapsed_time"]
         t_elapsed_on_way = t - prev_t  # Seconds
 
@@ -207,23 +215,24 @@ def write_map_matches(
         country_dir = os.path.join(map_matches_dir, country)
         # Make the dir if it does not exist yet
         if not os.path.exists(country_dir):
-            os.mkdir(country_dir)
-        for region, new_rows in regions.items():
-            region_filename = os.path.join(country_dir, region + ".pickle")
             try:
-                existing_rows: list[tuple] = pickle.load(open(region_filename, "rb"))
-                existing_rows.extend(new_rows)
+                os.mkdir(country_dir)
+            except Exception as e:
                 print(
-                    "Write Results: {}/{} Len: {}".format(country, region, len(existing_rows))
-                )
-                pickle.dump(existing_rows, open(region_filename, "wb"))
-            except (OSError, IOError):
-                print(
-                    "Creating region .pickle file for {}/{} Len: {}...".format(
-                        country, region, len(new_rows)
+                    "WARNING: Received exception while trying to mkdir {}, assuming it already exists...: {}".format(
+                        country_dir, repr(e)
                     )
                 )
-                pickle.dump(new_rows, open(region_filename, "wb"))
+        for region, rows in regions.items():
+            region_filename = util.get_map_match_region_filename_with_identifier(
+                country_dir, region
+            )
+            print(
+                "Creating region file of len = {} under {}...".format(
+                    len(rows), region_filename
+                )
+            )
+            pickle.dump(rows, open(region_filename, "wb"))
 
 
 def get_type_for_edge(edge: any) -> str:
