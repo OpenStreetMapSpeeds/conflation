@@ -5,7 +5,7 @@ import multiprocessing
 
 from conflation import aggregation, util
 from conflation.map_matching import valhalla
-from conflation.trace_fetching import mapillary
+from conflation.trace_fetching import mapillary, mapillary_v3
 
 
 def main():
@@ -57,9 +57,13 @@ def main():
         mapillary.run(
             parsed_args.bbox, traces_dir, tmp_dir, trace_config, parsed_args.concurrency
         )
+    if trace_config["provider"] == "mapillary_v3":
+        mapillary_v3.run(
+            parsed_args.bbox, traces_dir, tmp_dir, trace_config, parsed_args.concurrency
+        )
     else:
         raise NotImplementedError(
-            'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(
+            'Trace data source "{}" not supported. Currently supported: ["mapillary", "mapillary_v3"]'.format(
                 trace_config["provider"]
             )
         )

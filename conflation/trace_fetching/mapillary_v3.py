@@ -1,5 +1,4 @@
 import datetime
-import math
 import multiprocessing
 import os
 import pickle
@@ -290,17 +289,18 @@ def split_bbox(
     traces_dir: str,
     bbox: str,
     to_bbox_str: Callable[[float, float, float, float], str],
-    zoom: int = 13,
+    section_size: float = 0.25,
 ) -> list[tuple[str, str]]:
     """
-    Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks being tiles at a specific
-    zoom level. TODO
+    Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
+    section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
+    removed).
 
     :param traces_dir: name of dir where traces should be stored
     :param bbox: bbox string from arg
     :param to_bbox_str: function that takes (min_long, min_lat, max_long, max_lat) bbox definition coordinates, and
         returns a string that we will feed into the next function. Should be the same format as the API source expects
-    :param zoom: TODO
+    :param section_size: the smaller bbox sections will have max_long-min_long = max_lat-min_lat = section_size
     :return: list of tuples, 0 index: bbox section strings, whose format will be dictated by the to_bbox_str
         function, 1 index: the filename where the pulled trace data should be stored
     """
@@ -319,7 +319,6 @@ def split_bbox(
                 "max_latitude`.".format(bbox)
             )
 
-        """
         # Perform a check to see how many sections would be generated
         num_files = int(
             ((max_long - min_long) // section_size + 1)
@@ -334,21 +333,8 @@ def split_bbox(
             )
         else:
             print("{} bbox sections will be generated...".format(num_files))
-        """
+
         bbox_sections = []
-
-        tile1 = get_tile_from_lon_lat(min_long, min_lat, zoom)
-        tile2 = get_tile_from_lon_lat(max_long, max_lat, zoom)
-
-        start_x, end_x = min(tile1[0], tile2[0]), max(tile1[0], tile2[0])
-        start_y, end_y = min(tile1[1], tile2[1]), max(tile1[1], tile2[1])
-
-        for x in range(start_x, end_x + 1):
-            for y in range(start_y, end_y + 1):
-                print(x, y, zoom)
-                # TODO
-
-        """
         prev_long = min_long
         while prev_long < max_long:
             cur_long = min(prev_long + section_size, max_long)
@@ -368,19 +354,7 @@ def split_bbox(
                 bbox_sections.append((bbox_str, trace_filename))
                 prev_lat += section_size
             prev_long += section_size
-        """
 
         pickle.dump(bbox_sections, open(sections_filename, "wb"))
 
     return bbox_sections
-
-
-def get_tile_from_lon_lat(lon: float, lat: float, zoom: int) -> tuple[int, int]:
-    """
-    Turns a lon/lat measurement into a Slippy map tile at a given zoom.
-    """
-    lat_rad = math.radians(lat)
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-    return (xtile, ytile)
