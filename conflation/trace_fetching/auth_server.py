@@ -11,40 +11,44 @@ continue with the rest of the work
 Usage::
     ./server.py mapillary_client_id mapillary_client_secret
 """
-from sys import argv
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
 
-client_id = ''
-client_secret = ''
+client_id = ""
+client_secret = ""
+
 
 class S(BaseHTTPRequestHandler):
-    def _set_response(self, type='text/html'):
+    def _set_response(self, type="text/html"):
         self.send_response(200)
-        self.send_header('Content-type', type)
-        self.send_header('Origin', 'http://localhost:8080/')
+        self.send_header("Content-type", type)
+        self.send_header("Origin", "http://localhost:8080/")
         self.end_headers()
 
     def do_GET(self):
-        auth_code = self.path[self.path.find('code=') + 5:]
-        body = {'grant_type': 'authorization_code', 'code': auth_code}
-        headers = {'Authorization': 'OAuth MLY|{}|{}'.format(client_id, client_secret)}
-        resp = requests.post('https://graph.mapillary.com/token?client_id={}'.format(client_id), json = body, headers = headers).text
-        self._set_response('application/json')
-        self.wfile.write(resp.encode('utf-8'))
+        auth_code = self.path[self.path.find("code=") + 5 :]
+        body = {"grant_type": "authorization_code", "code": auth_code}
+        headers = {"Authorization": "OAuth MLY|{}|{}".format(client_id, client_secret)}
+        resp = requests.post(
+            "https://graph.mapillary.com/token?client_id={}".format(client_id),
+            json=body,
+            headers=headers,
+        ).text
+        self._set_response("application/json")
+        self.wfile.write(resp.encode("utf-8"))
+
 
 def run(server_class=HTTPServer, handler_class=S, port=8080):
-    server_address = ('localhost', port)
+    server_address = ("localhost", port)
     httpd = server_class(server_address, handler_class)
-    print('Starting httpd...')
+    print("Starting httpd...")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     httpd.server_close()
-    print('Stopping httpd...')
+    print("Stopping httpd...")
 
-if __name__ == '__main__':
-    client_id = sys.argv[1]
-    client_secret = sys.argv[2]
+
+if __name__ == "__main__":
     run()
