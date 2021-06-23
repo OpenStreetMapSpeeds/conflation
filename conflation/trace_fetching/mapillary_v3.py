@@ -6,7 +6,6 @@ import requests
 from dateutil import parser
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from typing import Callable
 
 from conflation import util, trace_filter
 
@@ -42,7 +41,7 @@ def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) 
         raise KeyError('Missing "client_id" (Mapillary Client ID) key in --trace-config JSON.')
 
     # Break the bbox into sections and save it to a pickle file
-    bbox_sections = split_bbox(traces_dir, bbox, to_bbox)
+    bbox_sections = split_bbox(traces_dir, bbox)
 
     finished_bbox_sections = multiprocessing.Value("i", 0)
     with multiprocessing.Pool(
@@ -68,7 +67,7 @@ def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) 
         return 1
 
 
-def to_bbox(llo: float, lla: float, mlo: float, mla: float) -> str:
+def to_bbox_str(llo: float, lla: float, mlo: float, mla: float) -> str:
     """
     Given (min_lon, min_lat, max_lon, max_lat) bounding box values, returns a string representation understood by
     Mapillary APIs.
@@ -288,7 +287,6 @@ def make_trace_data_requests(
 def split_bbox(
     traces_dir: str,
     bbox: str,
-    to_bbox_str: Callable[[float, float, float, float], str],
     section_size: float = 0.25,
 ) -> list[tuple[str, str]]:
     """
@@ -298,8 +296,6 @@ def split_bbox(
 
     :param traces_dir: name of dir where traces should be stored
     :param bbox: bbox string from arg
-    :param to_bbox_str: function that takes (min_long, min_lat, max_long, max_lat) bbox definition coordinates, and
-        returns a string that we will feed into the next function. Should be the same format as the API source expects
     :param section_size: the smaller bbox sections will have max_long-min_long = max_lat-min_lat = section_size
     :return: list of tuples, 0 index: bbox section strings, whose format will be dictated by the to_bbox_str
         function, 1 index: the filename where the pulled trace data should be stored
