@@ -5,7 +5,7 @@ import multiprocessing
 
 from conflation import aggregation, util
 from conflation.map_matching import valhalla
-from conflation.trace_fetching import mapillary
+from conflation.trace_fetching import mapillary, mapillary_v3, auth_server
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     arg_parser.add_argument(
         "--trace-config",
         type=str,
-        help='JSON of configurable settings for where / how to pull the GPS trace. See .README for specific fields. E.g. {"provider":"mapillary","client_id":"xxx","sequences_per_page":50,"skip_if_fewer_images_than":5, "start_date":"2020-01-01"}',
+        help='JSON of configurable settings for where / how to pull the GPS trace. See .README for specific fields. E.g. {"provider":"mapillary","client_id":"xxx","client_secret":"xxx","sequences_per_page":50,"skip_if_fewer_images_than":5, "start_date":"2020-01-01"}',
         required=True,
     )
     arg_parser.add_argument(
@@ -54,12 +54,33 @@ def main():
 
     # Pull and filter trace data
     if trace_config["provider"] == "mapillary":
+        # Do a quick check to see if user specified the mandatory 'client_id' and 'client_secret' in config JSON
+        if "client_id" not in trace_config:
+            raise KeyError(
+                'Missing "client_id" (Mapillary Client ID) key in --trace-config JSON.'
+            )
+        if "client_secret" not in trace_config:
+            raise KeyError(
+                'Missing "client_secret" (Mapillary Client ID) key in --trace-config JSON.'
+            )
+        access_token = auth_server.run(
+            trace_config["client_id"], trace_config["client_secret"]
+        )
         mapillary.run(
+            parsed_args.bbox,
+            traces_dir,
+            tmp_dir,
+            trace_config,
+            parsed_args.concurrency,
+            access_token,
+        )
+    elif trace_config["provider"] == "mapillary_v3":
+        mapillary_v3.run(
             parsed_args.bbox, traces_dir, tmp_dir, trace_config, parsed_args.concurrency
         )
     else:
         raise NotImplementedError(
-            'Trace data source "{}" not supported. Currently supported: ["mapillary"]'.format(
+            'Trace data source "{}" not supported. Currently supported: ["mapillary", "mapillary_v3"]'.format(
                 trace_config["provider"]
             )
         )

@@ -1,5 +1,4 @@
 import datetime
-import math
 import multiprocessing
 import os
 import pickle
@@ -21,19 +20,12 @@ SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to a
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = (
     10  # We will skip any sequences if they have fewer than this number of images
 )
-
-TILES_URL = (
-    "https://tiles.mapillary.com/maps/vtp/mly_map_feature_point/2/{}/{}/{}?access_token={}"
-)
-
 SEQUENCE_URL = "https://a.mapillary.com/v3/sequences_without_images?client_id={}&bbox={}&per_page={}&start_date={}"
 IMAGES_URL = "https://a.mapillary.com/v3/images?client_id={}&sequence_keys={}&per_page={}"
 MAX_FILES_IN_DIR = 500  # Maximum number of files we will put in one directory
 
 
-def run(
-    bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int, access_token: str
-) -> int:
+def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) -> int:
     """
     Entrypoint for pulling trace date from Mapillary APIs. Will pull all trace data in the given bbox and store it in
     the traces_dir, using the number of processes specified and any conf values from the `config` JSON.
@@ -43,20 +35,18 @@ def run(
     :param tmp_dir: Dir where temp output files will be stored (should be empty upon completion)
     :param config: Dict of configs, see the .README or the conf param of make_trace_data_requests()
     :param processes: Number of threads to use
-    :param access_token: Mapillary access token for API calls
     """
+    # Do a quick check to see if user specified the mandatory 'client_id' in config JSON
+    if "client_id" not in config:
+        raise KeyError('Missing "client_id" (Mapillary Client ID) key in --trace-config JSON.')
+
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = split_bbox(traces_dir, bbox)
-
-    print("bbox_sections={}".format(bbox_sections))
-    print("access_token={}".format(access_token))
-    print("Rest is not yet implemented.")
-    return 0
 
     finished_bbox_sections = multiprocessing.Value("i", 0)
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
-        initargs=(tmp_dir, config, finished_bbox_sections, access_token),
+        initargs=(tmp_dir, config, finished_bbox_sections),
         processes=processes,
     ) as pool:
         result = pool.map_async(pull_filter_and_save_trace_for_bbox, bbox_sections)
@@ -77,6 +67,14 @@ def run(
         return 1
 
 
+def to_bbox_str(llo: float, lla: float, mlo: float, mla: float) -> str:
+    """
+    Given (min_lon, min_lat, max_lon, max_lat) bounding box values, returns a string representation understood by
+    Mapillary APIs.
+    """
+    return ",".join([str(llo), str(lla), str(mlo), str(mla)])
+
+
 def is_within_bbox(lon: float, lat: float, bbox: list[float]) -> bool:
     """
     Checks if lon / lat coordinate is within a bbox in the format of [min_lon, min_lat, max_lon, max_lat]
@@ -88,7 +86,6 @@ def initialize_multiprocess(
     global_tmp_dir_: str,
     global_config_: dict,
     finished_bbox_sections_: multiprocessing.Value,
-    access_token_: str,
 ) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess API requests.
@@ -114,9 +111,6 @@ def initialize_multiprocess(
     # Integer counter of num of finished bbox_sections
     global finished_bbox_sections
     finished_bbox_sections = finished_bbox_sections_
-
-    global access_token
-    access_token = access_token_
 
 
 def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
@@ -179,6 +173,8 @@ def make_trace_data_requests(
     # We will use this dict to group trace points by sequence ID
     sequences_by_id = {}
 
+    map_client_id = conf["client_id"]  # The Mapillary client ID, mandatory key of conf
+
     # Check to see if user specified any overrides in conf JSON
     seq_per_page = (
         conf["sequences_per_page"]
@@ -202,7 +198,7 @@ def make_trace_data_requests(
 
     # Paginate sequences within this bbox
     print("@ MAPILLARY: Getting seq for bbox={}".format(bbox))
-    seq_next_url = SEQUENCE_URL.format(access_token, bbox, seq_per_page, start_date)
+    seq_next_url = SEQUENCE_URL.format(map_client_id, bbox, seq_per_page, start_date)
     seq_page = 1
     while seq_next_url:
         print("@@ MAPILLARY: Seq Page {}, url={}".format(seq_page, seq_next_url))
@@ -238,7 +234,7 @@ def make_trace_data_requests(
 
         if len(seq_ids) > 0:
             # Paginate images within these sequences
-            img_next_url = IMAGES_URL.format(access_token, ",".join(seq_ids), img_per_page)
+            img_next_url = IMAGES_URL.format(map_client_id, ",".join(seq_ids), img_per_page)
             img_page = 1
             while img_next_url:
                 print("@@@ MAPILLARY: Image Page {}, url={}".format(img_page, img_next_url))
@@ -265,8 +261,9 @@ def make_trace_data_requests(
         # Already collected enough sequences. Move onto the next bbox section
         if len(sequences_by_id) > max_sequences_per_bbox_section:
             print(
-                "## Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}. "
-                "Continuing...".format(len(sequences_by_id), max_sequences_per_bbox_section)
+                "## Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}. Continuing...".format(
+                    len(sequences_by_id), max_sequences_per_bbox_section
+                )
             )
             break
 
@@ -290,15 +287,16 @@ def make_trace_data_requests(
 def split_bbox(
     traces_dir: str,
     bbox: str,
-    zoom: int = 5,
+    section_size: float = 0.25,
 ) -> list[tuple[str, str]]:
     """
-    Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks being tiles at a specific
-    zoom level. TODO
+    Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks having long/lat sizes =
+    section_size. Also writes the bbox sections to disk so we can pick up instructions from previous runs (may be
+    removed).
 
     :param traces_dir: name of dir where traces should be stored
     :param bbox: bbox string from arg
-    :param zoom: TODO
+    :param section_size: the smaller bbox sections will have max_long-min_long = max_lat-min_lat = section_size
     :return: list of tuples, 0 index: bbox section strings, whose format will be dictated by the to_bbox_str
         function, 1 index: the filename where the pulled trace data should be stored
     """
@@ -317,7 +315,6 @@ def split_bbox(
                 "max_latitude`.".format(bbox)
             )
 
-        """
         # Perform a check to see how many sections would be generated
         num_files = int(
             ((max_long - min_long) // section_size + 1)
@@ -332,21 +329,8 @@ def split_bbox(
             )
         else:
             print("{} bbox sections will be generated...".format(num_files))
-        """
+
         bbox_sections = []
-
-        tile1 = get_tile_from_lon_lat(min_long, min_lat, zoom)
-        tile2 = get_tile_from_lon_lat(max_long, max_lat, zoom)
-
-        start_x, end_x = min(tile1[0], tile2[0]), max(tile1[0], tile2[0])
-        start_y, end_y = min(tile1[1], tile2[1]), max(tile1[1], tile2[1])
-
-        for x in range(start_x, end_x + 1):
-            for y in range(start_y, end_y + 1):
-                print(x, y, zoom)
-                # TODO
-
-        """
         prev_long = min_long
         while prev_long < max_long:
             cur_long = min(prev_long + section_size, max_long)
@@ -366,19 +350,7 @@ def split_bbox(
                 bbox_sections.append((bbox_str, trace_filename))
                 prev_lat += section_size
             prev_long += section_size
-        """
 
         pickle.dump(bbox_sections, open(sections_filename, "wb"))
 
     return bbox_sections
-
-
-def get_tile_from_lon_lat(lon: float, lat: float, zoom: int) -> tuple[int, int]:
-    """
-    Turns a lon/lat measurement into a Slippy map tile at a given zoom.
-    """
-    lat_rad = math.radians(lat)
-    n = 2.0 ** zoom
-    xtile = int((lon + 180.0) / 360.0 * n)
-    ytile = int((1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n)
-    return xtile, ytile
