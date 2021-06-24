@@ -48,6 +48,11 @@ def run(
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = split_bbox(traces_dir, bbox)
 
+    print("bbox_sections={}".format(bbox_sections))
+    print("access_token={}".format(access_token))
+    print("Rest is not yet implemented.")
+    return 0
+
     finished_bbox_sections = multiprocessing.Value("i", 0)
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,

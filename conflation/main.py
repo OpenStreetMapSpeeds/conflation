@@ -74,7 +74,7 @@ def main():
             parsed_args.concurrency,
             access_token,
         )
-    if trace_config["provider"] == "mapillary_v3":
+    elif trace_config["provider"] == "mapillary_v3":
         mapillary_v3.run(
             parsed_args.bbox, traces_dir, tmp_dir, trace_config, parsed_args.concurrency
         )
