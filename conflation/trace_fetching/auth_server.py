@@ -11,11 +11,16 @@ continue with the rest of the work
 Usage::
     ./server.py mapillary_client_id mapillary_client_secret
 """
-from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+
+AUTH_URL = "https://www.mapillary.com/connect?client_id={}"
 
 client_id = ""
 client_secret = ""
+access_token = ""
 
 
 class S(BaseHTTPRequestHandler):
@@ -26,6 +31,9 @@ class S(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        global client_id
+        global client_secret
+        global access_token
         auth_code = self.path[self.path.find("code=") + 5 :]
         body = {"grant_type": "authorization_code", "code": auth_code}
         headers = {"Authorization": "OAuth MLY|{}|{}".format(client_id, client_secret)}
@@ -33,22 +41,29 @@ class S(BaseHTTPRequestHandler):
             "https://graph.mapillary.com/token?client_id={}".format(client_id),
             json=body,
             headers=headers,
-        ).text
-        self._set_response("application/json")
-        self.wfile.write(resp.encode("utf-8"))
+        ).json()
+        access_token = resp["access_token"]
+        raise KeyboardInterrupt
 
 
-def run(server_class=HTTPServer, handler_class=S, port=8080):
+def run(
+    client_id_: str, client_secret_: str, server_class=HTTPServer, handler_class=S, port=8080
+) -> str:
+    global client_id
+    global client_secret
+    global access_token
+
+    client_id = client_id_
+    client_secret = client_secret_
+
     server_address = ("localhost", port)
     httpd = server_class(server_address, handler_class)
-    print("Starting httpd...")
+    print("Starting httpd and opening Mapillary to authenticate...")
     try:
+        webbrowser.open_new_tab(AUTH_URL.format(client_id))
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     httpd.server_close()
     print("Stopping httpd...")
-
-
-if __name__ == "__main__":
-    run()
+    return access_token
