@@ -18,8 +18,8 @@ MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # How many sequences to process for 
 SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to a year old
     datetime.datetime.now() - datetime.timedelta(days=365)
 )
-SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = (
-    10  # We will skip any sequences if they have fewer than this number of images
+SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = (  # We will skip any sequences if they have fewer than this number of images
+    30
 )
 COVERAGE_TILES_URL = (
     "https://tiles.mapillary.com/maps/vtp/mly1_public/2/{}/{}/{}?access_token={}"
@@ -27,7 +27,9 @@ COVERAGE_TILES_URL = (
 SEQUENCE_URL = "https://graph.mapillary.com/image_ids?fields=id&sequence_id={}&access_token={}"
 IMAGES_URL = "https://graph.mapillary.com/images?fields=captured_at,geometry&image_ids={}&access_token={}"
 
+# Mapillary v4 supports "coverage" search over a zoom level from 0 to 5. We perform the coverage search at zoom 5
 COVERAGE_ZOOM = 5
+# We then perform the actual search for trace sequences at zoom 14
 BBOX_SECTION_ZOOM = 14
 
 
@@ -41,9 +43,10 @@ def run(
     :param bbox: Bounding box we are searching over, in the format of 'min_lon,min_lat,max_lon,max_lat'
     :param traces_dir: Dir where trace data will be pickled to
     :param tmp_dir: Dir where temp output files will be stored (should be empty upon completion)
-    :param config: Dict of configs, see the .README or the conf param of make_trace_data_requests()
+    :param config: Dict of configs. Mandatory keys are ['client_id', 'client_secret']. Optional keys are
+        ['start_date', 'max_sequences_per_bbox_section', 'skip_if_fewer_imgs_than']
     :param processes: Number of threads to use
-    :param access_token: Mapillary access token for API calls
+    :param access_token: Mapillary v4 access token (obtained through OAuth)
     """
 
     # Requests session for persistent connections and timeout settings
@@ -141,8 +144,8 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[int, int, str]) -> N
     to avoid issues if script crashes during the pickle dump. Meant to be run in a multi-threaded manner and references
     global vars made by initialize_multiprocess().
 
-    :param bbox_section: Tuple of (str representation of bbox to feed into Mapillary API, filename where filtered result
-        should be stored) FIXME
+    :param bbox_section: tuple where [0:1] indices: [x,y] coordinate of the zoom 14 tile, [2] index: the filename where
+        the pulled trace data should be stored
     """
     try:
         tile, trace_filename = bbox_section[0:2], bbox_section[2]
@@ -184,12 +187,12 @@ def make_trace_data_requests(
     session_: requests.Session, tile: tuple[int, int], conf: any
 ) -> list[list[dict]]:
     """
-    Makes the actual calls to Mapillary API to pull trace data for a given bbox string.
+    Makes the actual calls to Mapillary API to pull trace data for a given tile at zoom 14.
 
     :param session_: requests.Session() to persist session across API calls
-    :param tile: `lon,min_lat,max_lon,max_lat' FIXME
-    :param conf: Dict of configs. Mandatory keys are ['client_id']. Optional keys are ['sequences_per_page',
-        'skip_if_fewer_images_than', 'start_date'] FIXME
+    :param tile: Tuple of [x,y] that represents a tile at z14.
+    :param conf: Dict of configs. Mandatory keys are ['client_id', 'client_secret']. Optional keys are
+        ['start_date', 'max_sequences_per_bbox_section', 'skip_if_fewer_imgs_than']
     :return: List of trace data sequences. Trace data is in format understood by Valhalla map matching process, i.e. it
         has 'lon', 'lat', 'time', and optionally 'radius' keys
     """
@@ -222,6 +225,8 @@ def make_trace_data_requests(
         for feature in layer.features:
             captured_at = None
             sequence_id = None
+
+            # Pull out the sequence id and when it was captured
             for i in range(0, len(feature.tags), 2):
                 k = keys[feature.tags[i]]
                 if k == "captured_at":
@@ -264,6 +269,10 @@ def make_trace_data_requests(
                         images[0]["lon"],
                         images[0]["lat"],
                     )
+
+                    # We need to check if this specific sequence is covered by this zoom 14 tile. We do this by getting
+                    # the lon, lat coordinates of this tile and checking the first coordinate of the sequence. This way
+                    # we prevent the same sequence being processed by multiple different threads / zoom 14 tiles
                     upper_left_corner = get_lon_lat_from_tile(
                         BBOX_SECTION_ZOOM, tile[0], tile[1]
                     )
@@ -309,15 +318,16 @@ def split_bbox(
     start_date_epoch: float,
 ) -> list[tuple[int, int, str]]:
     """
-    Takes the given bbox and splits it up into smaller sections, with the smaller bbox chunks being tiles at a specific
-    zoom level. TODO
+    Takes the given bbox, converts it into zoom 5 tiles to check Mapillary coverage, then outputs a list of zoom 14
+    tiles that we should call to find trace sequences.
 
-    :param start_date_epoch:
+    :param session_: requests session
     :param traces_dir: name of dir where traces should be stored
     :param bbox: bbox string from arg
-    :param access_token_: TODO
-    :return: list of tuples, 0 index: bbox section strings, whose format will be dictated by the to_bbox_str
-        function, 1 index: the filename where the pulled trace data should be stored TODO
+    :param access_token_: Mapillary v4 access token (obtained through OAuth)
+    :param start_date_epoch: Epoch timestamp; any traces taken at a time older than this timestamp will be rejected
+    :return: list of tuples, [0:1] indices: [x,y] coordinate of the zoom 14 tile, [2] index: the filename where the
+        pulled trace data should be stored
     """
     sections_filename = util.get_sections_filename(traces_dir)
 
@@ -367,93 +377,135 @@ def split_bbox(
                 tile_pb = vector_tile_pb2.Tile()
                 tile_pb.ParseFromString(resp.content)
 
-                counter = 0
+                add_z14_tiles_from_coverage_tile_to_bbox_sections(
+                    bbox_sections,
+                    tile_pb,
+                    base_x_zoom_14,
+                    base_y_zoom_14,
+                    x,
+                    y,
+                    min_lon,
+                    min_lat,
+                    max_lon,
+                    max_lat,
+                    traces_dir,
+                )
 
-                for layer in tile_pb.layers:
-                    keys = [v for v in layer.keys]
-                    values = [v for v in layer.values]
-                    for feature in layer.features:
-                        for i in range(0, len(feature.tags), 2):
-                            k = keys[feature.tags[i]]
-                            if k == "captured_at":  # TODO: Make this less indented
-                                v = values[feature.tags[i + 1]].int_value
-                                # Only consider pixels where the latest sequence is less than one year old
-                                if v > start_date_epoch:
-                                    counter += 1
-
-                                    pixel_x, pixel_y = feature.geometry[1], feature.geometry[2]
-                                    decoded_x = (pixel_x >> 1) ^ (-(pixel_x & 1))
-                                    decoded_y = (pixel_y >> 1) ^ (-(pixel_y & 1))
-
-                                    quantized_x = round((decoded_x - 7) / 16)
-                                    quantized_y = round((decoded_y - 7) / 16)
-
-                                    candidate_zoom_14_tiles = [
-                                        (
-                                            base_x_zoom_14 + quantized_x * 2,
-                                            base_y_zoom_14 + quantized_y * 2,
-                                        ),
-                                        (
-                                            base_x_zoom_14 + quantized_x * 2 + 1,
-                                            base_y_zoom_14 + quantized_y * 2,
-                                        ),
-                                        (
-                                            base_x_zoom_14 + quantized_x * 2,
-                                            base_y_zoom_14 + quantized_y * 2 + 1,
-                                        ),
-                                        (
-                                            base_x_zoom_14 + quantized_x * 2 + 1,
-                                            base_y_zoom_14 + quantized_y * 2 + 1,
-                                        ),
-                                    ]
-
-                                    zoom_14_tiles_in_bbox = []
-                                    for candidate_x, candidate_y in candidate_zoom_14_tiles:
-                                        (
-                                            candidate_min_lon,
-                                            candidate_max_lat,
-                                        ) = get_lon_lat_from_tile(
-                                            BBOX_SECTION_ZOOM, candidate_x, candidate_y
-                                        )
-                                        (
-                                            candidate_max_lon,
-                                            candidate_min_lat,
-                                        ) = get_lon_lat_from_tile(
-                                            BBOX_SECTION_ZOOM, candidate_x + 1, candidate_y + 1
-                                        )
-
-                                        if bboxes_overlap(
-                                            min_lon,
-                                            min_lat,
-                                            max_lon,
-                                            max_lat,
-                                            candidate_min_lon,
-                                            candidate_min_lat,
-                                            candidate_max_lon,
-                                            candidate_max_lat,
-                                        ):
-                                            # The file on disk where we will store trace data, with a dir
-                                            trace_filename = os.path.join(
-                                                traces_dir,
-                                                "_".join([str(COVERAGE_ZOOM), str(x), str(y)]),
-                                                "_".join(
-                                                    [
-                                                        str(BBOX_SECTION_ZOOM),
-                                                        str(candidate_x),
-                                                        str(candidate_y),
-                                                    ]
-                                                )
-                                                + ".pickle",
-                                            )
-
-                                            zoom_14_tiles_in_bbox.append(
-                                                (candidate_x, candidate_y, trace_filename)
-                                            )
-                                    bbox_sections.extend(zoom_14_tiles_in_bbox)
-                        pass
         pickle.dump(bbox_sections, open(sections_filename, "wb"))
 
     return bbox_sections
+
+
+def add_z14_tiles_from_coverage_tile_to_bbox_sections(
+    bbox_sections: list[tuple[int, int, str]],
+    tile_pb: vector_tile_pb2.Tile,
+    base_x_zoom_14: int,
+    base_y_zoom_14: int,
+    x: int,
+    y: int,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    traces_dir: str,
+):
+    """
+    Parses the given tile_pb (which is the protobuf of a Mapillary zoom 5 coverage tile), and determines which zoom 14
+    tiles that we will need to traverse for trace sequences. The zoom 5 tiles have "pixels" that are quantized in a
+    256x256 fashion. We decode and iterate over these pixels. Each pixel that has a sequence recent enough is
+    considered. We also make sure that any zoom 14 tiles we add to bbox_sections is within the original bbox passed in
+    (as defined by the min_lon, min_lat, max_lon, max_lat args)
+
+    :param bbox_sections: adds to this list of bbox_sections in-place
+    :param tile_pb: zoom 5 coverage tile to parse
+    :param base_x_zoom_14: the x of the zoom 14 tile that corresponds with the (0, 0) pixel of this zoom 5 coverage tile
+    :param base_y_zoom_14: the y of the zoom 14 tile that corresponds with the (0, 0) pixel of this zoom 5 coverage tile
+    :param x: of the zoom 5 tile
+    :param y: of the zoom 5 tile
+    :param min_lon: of the original bbox of the run
+    :param min_lat: of the original bbox of the run
+    :param max_lon: of the original bbox of the run
+    :param max_lat: of the original bbox of the run
+    :param traces_dir: str where we should store the traces output
+    """
+    for layer in tile_pb.layers:
+        # This is how we can traverse data within the protobuf
+        keys = [v for v in layer.keys]
+        values = [v for v in layer.values]
+        for feature in layer.features:
+            # We want to find the captured_at key which will tell us if the sequences in this pixel is recent enough
+            for i in range(0, len(feature.tags), 2):
+                if keys[feature.tags[i]] != "captured_at":
+                    continue
+
+                # Only consider pixels where the latest sequence is less than one year old
+                if values[feature.tags[i + 1]].int_value > start_date_epoch:
+                    pixel_x, pixel_y = feature.geometry[1], feature.geometry[2]
+
+                    # Need to decode the pixel as per protobuf definition
+                    decoded_x = (pixel_x >> 1) ^ (-(pixel_x & 1))
+                    decoded_y = (pixel_y >> 1) ^ (-(pixel_y & 1))
+
+                    # The decoded (x, y) is actually corresponding to the "center" of a 16x16 square of pixels, so we
+                    # "quantize" it which gives us (quantized_x, quantized_y) in the range of (0, 0) to (256, 256)
+                    quantized_x = round((decoded_x - 7) / 16)
+                    quantized_y = round((decoded_y - 7) / 16)
+
+                    # The potential zoom 14 tiles we can add. Each quantized pixel corresponds with four zoom 14 tiles
+                    candidate_zoom_14_tiles = [
+                        (base_x_zoom_14 + quantized_x * 2, base_y_zoom_14 + quantized_y * 2),
+                        (
+                            base_x_zoom_14 + quantized_x * 2 + 1,
+                            base_y_zoom_14 + quantized_y * 2,
+                        ),
+                        (
+                            base_x_zoom_14 + quantized_x * 2,
+                            base_y_zoom_14 + quantized_y * 2 + 1,
+                        ),
+                        (
+                            base_x_zoom_14 + quantized_x * 2 + 1,
+                            base_y_zoom_14 + quantized_y * 2 + 1,
+                        ),
+                    ]
+
+                    # Figure out which of the candidate zoom 14 tiles are actually within the originally specified bbox
+                    zoom_14_tiles_in_bbox = []
+                    for candidate_x, candidate_y in candidate_zoom_14_tiles:
+                        candidate_min_lon, candidate_max_lat = get_lon_lat_from_tile(
+                            BBOX_SECTION_ZOOM, candidate_x, candidate_y
+                        )
+                        candidate_max_lon, candidate_min_lat = get_lon_lat_from_tile(
+                            BBOX_SECTION_ZOOM, candidate_x + 1, candidate_y + 1
+                        )
+
+                        if bboxes_overlap(
+                            min_lon,
+                            min_lat,
+                            max_lon,
+                            max_lat,
+                            candidate_min_lon,
+                            candidate_min_lat,
+                            candidate_max_lon,
+                            candidate_max_lat,
+                        ):
+                            # The file on disk where we will store trace data, with a dir
+                            trace_filename = os.path.join(
+                                traces_dir,
+                                "_".join([str(COVERAGE_ZOOM), str(x), str(y)]),
+                                "_".join(
+                                    [
+                                        str(BBOX_SECTION_ZOOM),
+                                        str(candidate_x),
+                                        str(candidate_y),
+                                    ]
+                                )
+                                + ".pickle",
+                            )
+
+                            zoom_14_tiles_in_bbox.append(
+                                (candidate_x, candidate_y, trace_filename)
+                            )
+                    bbox_sections.extend(zoom_14_tiles_in_bbox)
 
 
 def bboxes_overlap(
