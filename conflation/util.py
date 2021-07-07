@@ -23,6 +23,7 @@ def initialize_dirs(bbox_str: str) -> tuple[str, str, str, str]:
 
     # Use a hash function to generate an "ID" for this bbox. Helped to detect duplicate runs.
     bbox = get_sha1_truncated_id(bbox_str)
+    print("This run's ID: {}. All output files will be placed in output/{}".format(bbox, bbox))
     traces_dir = os.path.join(os.path.dirname(os.getcwd()), OUTPUT_DIR, bbox, TRACES_DIR)
     tmp_dir = os.path.join(os.path.dirname(os.getcwd()), OUTPUT_DIR, bbox, TEMP_DIR)
     map_matches_dir = os.path.join(

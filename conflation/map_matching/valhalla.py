@@ -90,17 +90,18 @@ def initialize_multiprocess(
     global_config = global_config_
 
 
-def map_match_for_bbox(bbox_section: tuple[str, str]) -> None:
+def map_match_for_bbox(bbox_sections: tuple) -> None:
     """
     Performs map matching for a given bbox section. It pulls the bbox section's traces from the previous steps by
     finding it on the filesystem. For each sequence in the traces, it passes it to add_map_matches_for_shape to make the
     actual Valhalla call. Map matching results are propagated to disk with write_map_matches and the original traces
     pickle is renamed as a checkpoint.
 
-    :param bbox_section: From util.split_bbox, used in previous step
+    :param bbox_sections: From util.split_bbox, used in previous step. List of tuples, where the last element is the
+        filename where the trace data is stored.
     """
     try:
-        bbox, trace_filename = bbox_section
+        bbox, trace_filename = bbox_sections[:-1], bbox_sections[-1]
         processed_trace_filename = util.get_processed_trace_filename(trace_filename)
 
         # Check to see if the trace has already been processed by map_matching
