@@ -380,6 +380,7 @@ def split_bbox(
                 add_z14_tiles_from_coverage_tile_to_bbox_sections(
                     bbox_sections,
                     tile_pb,
+                    start_date_epoch,
                     base_x_zoom_14,
                     base_y_zoom_14,
                     x,
@@ -399,6 +400,7 @@ def split_bbox(
 def add_z14_tiles_from_coverage_tile_to_bbox_sections(
     bbox_sections: list[tuple[int, int, str]],
     tile_pb: vector_tile_pb2.Tile,
+    start_date_epoch_: float,
     base_x_zoom_14: int,
     base_y_zoom_14: int,
     x: int,
@@ -418,6 +420,7 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
 
     :param bbox_sections: adds to this list of bbox_sections in-place
     :param tile_pb: zoom 5 coverage tile to parse
+    :param start_date_epoch_: Epoch timestamp; any traces taken at a time older than this timestamp will be rejected
     :param base_x_zoom_14: the x of the zoom 14 tile that corresponds with the (0, 0) pixel of this zoom 5 coverage tile
     :param base_y_zoom_14: the y of the zoom 14 tile that corresponds with the (0, 0) pixel of this zoom 5 coverage tile
     :param x: of the zoom 5 tile
@@ -439,7 +442,7 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
                     continue
 
                 # Only consider pixels where the latest sequence is less than one year old
-                if values[feature.tags[i + 1]].int_value > start_date_epoch:
+                if values[feature.tags[i + 1]].int_value > start_date_epoch_:
                     pixel_x, pixel_y = feature.geometry[1], feature.geometry[2]
 
                     # Need to decode the pixel as per protobuf definition
