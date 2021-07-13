@@ -74,6 +74,13 @@ def run(
     bbox_sections = split_bbox(session, traces_dir, bbox, access_token, start_date_epoch)
 
     finished_bbox_sections = multiprocessing.Value("i", 0)
+
+    # Adding these "temporary" counters so that we can make some estimates of how much time is wasted due to seeing
+    # duplicate sequences across different z14 tiles
+    pulled_sequences = multiprocessing.Value("i", 0)
+    skipped_sequences_due_to_origin_coordinate = multiprocessing.Value("i", 0)
+    skipped_sequences_due_to_filters = multiprocessing.Value("i", 0)
+
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
         initargs=(
@@ -83,6 +90,9 @@ def run(
             config,
             finished_bbox_sections,
             start_date_epoch,
+            pulled_sequences,
+            skipped_sequences_due_to_origin_coordinate,
+            skipped_sequences_due_to_filters,
         ),
         processes=processes,
     ) as pool:
@@ -100,6 +110,15 @@ def run(
         if progress != 100 / increment:
             print("Current progress: 100%")
 
+        print(
+            "Pulled {} sequences. Skipped {} of these sequences because they were duplicates (not originating in "
+            "the current-processing bbox). Skipped {} of these sequences because of filters.".format(
+                pulled_sequences.value,
+                skipped_sequences_due_to_origin_coordinate.value,
+                skipped_sequences_due_to_filters.value,
+            )
+        )
+
         # TODO: Delete the tmp dir after run?
         return
 
@@ -111,6 +130,9 @@ def initialize_multiprocess(
     global_config_: dict,
     finished_bbox_sections_: multiprocessing.Value,
     start_date_epoch_: int,
+    pulled_sequences_: multiprocessing.Value,
+    skipped_sequences_due_to_origin_coordinate_: multiprocessing.Value,
+    skipped_sequences_due_to_filters_: multiprocessing.Value,
 ) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess API requests.
@@ -135,6 +157,15 @@ def initialize_multiprocess(
 
     global start_date_epoch
     start_date_epoch = start_date_epoch_
+
+    global pulled_sequences
+    pulled_sequences = pulled_sequences_
+
+    global skipped_sequences_due_to_origin_coordinate
+    skipped_sequences_due_to_origin_coordinate = skipped_sequences_due_to_origin_coordinate_
+
+    global skipped_sequences_due_to_filters
+    skipped_sequences_due_to_filters = skipped_sequences_due_to_filters_
 
 
 def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[int, int, str]) -> None:
@@ -161,13 +192,18 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[int, int, str]) -> N
 
         # We haven't pulled API trace data for this bbox section yet
         trace_data = make_trace_data_requests(session, tile, global_config)
-        if len(trace_data):
-            print("Before filter: lens: {}".format([len(t) for t in trace_data]))
+        before_filter_num_sequences = len(trace_data)
 
         # Perform some simple filters to weed out bad trace data
         trace_data = trace_filter.run(trace_data)
-        if len(trace_data):
-            print("After filter: lens: {}".format([len(t) for t in trace_data]))
+        after_filter_num_sequences = len(trace_data)
+
+        # Check how many sequences were filtered out
+        if after_filter_num_sequences < before_filter_num_sequences:
+            with skipped_sequences_due_to_filters.get_lock():
+                skipped_sequences_due_to_filters.value += (
+                    before_filter_num_sequences - after_filter_num_sequences
+                )
 
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
@@ -236,6 +272,9 @@ def make_trace_data_requests(
             if captured_at and captured_at > start_date_epoch:
                 if sequence_id and sequence_id not in seen_sequences:
                     seen_sequences.add(sequence_id)
+                    with pulled_sequences.get_lock():
+                        pulled_sequences.value += 1
+
                     sequence_resp = session_.get(
                         SEQUENCE_URL.format(sequence_id, access_token)
                     )
@@ -246,6 +285,8 @@ def make_trace_data_requests(
 
                     # Skip sequences that have too few images
                     if len(image_ids) < skip_if_fewer_imgs_than:
+                        with skipped_sequences_due_to_filters.get_lock():
+                            skipped_sequences_due_to_filters.value += 1
                         continue
 
                     images_resp = session_.get(
@@ -285,16 +326,9 @@ def make_trace_data_requests(
                         lower_right_corner[0],
                         upper_left_corner[1],
                     ]
-                    if not is_within_bbox(
-                        origin_lon,
-                        origin_lat,
-                        cur_tile_as_lon_lat,
-                    ):
-                        # print(
-                        #     "@@@ MAPILLARY: Skipping seq b/c origin ({}, {}) not in bbox_section {}".format(
-                        #         origin_lon, origin_lat, cur_tile_as_lon_lat
-                        #     )
-                        # )
+                    if not is_within_bbox(origin_lon, origin_lat, cur_tile_as_lon_lat):
+                        with skipped_sequences_due_to_origin_coordinate.get_lock():
+                            skipped_sequences_due_to_origin_coordinate.value += 1
                         continue
 
                     sequences.append(images)
@@ -377,19 +411,20 @@ def split_bbox(
                 tile_pb = vector_tile_pb2.Tile()
                 tile_pb.ParseFromString(resp.content)
 
-                add_z14_tiles_from_coverage_tile_to_bbox_sections(
-                    bbox_sections,
-                    tile_pb,
-                    start_date_epoch,
-                    base_x_zoom_14,
-                    base_y_zoom_14,
-                    x,
-                    y,
-                    min_lon,
-                    min_lat,
-                    max_lon,
-                    max_lat,
-                    traces_dir,
+                bbox_sections.extend(
+                    z14_tiles_from_coverage_tile_to_bbox_sections(
+                        tile_pb,
+                        start_date_epoch,
+                        base_x_zoom_14,
+                        base_y_zoom_14,
+                        x,
+                        y,
+                        min_lon,
+                        min_lat,
+                        max_lon,
+                        max_lat,
+                        traces_dir,
+                    )
                 )
 
         pickle.dump(bbox_sections, open(sections_filename, "wb"))
@@ -397,8 +432,7 @@ def split_bbox(
     return bbox_sections
 
 
-def add_z14_tiles_from_coverage_tile_to_bbox_sections(
-    bbox_sections: list[tuple[int, int, str]],
+def z14_tiles_from_coverage_tile_to_bbox_sections(
     tile_pb: vector_tile_pb2.Tile,
     start_date_epoch_: float,
     base_x_zoom_14: int,
@@ -410,7 +444,7 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
     max_lon: float,
     max_lat: float,
     traces_dir: str,
-):
+) -> list[tuple[int, int, str]]:
     """
     Parses the given tile_pb (which is the protobuf of a Mapillary zoom 5 coverage tile), and determines which zoom 14
     tiles that we will need to traverse for trace sequences. The zoom 5 tiles have "pixels" that are quantized in a
@@ -418,7 +452,6 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
     considered. We also make sure that any zoom 14 tiles we add to bbox_sections is within the original bbox passed in
     (as defined by the min_lon, min_lat, max_lon, max_lat args)
 
-    :param bbox_sections: adds to this list of bbox_sections in-place
     :param tile_pb: zoom 5 coverage tile to parse
     :param start_date_epoch_: Epoch timestamp; any traces taken at a time older than this timestamp will be rejected
     :param base_x_zoom_14: the x of the zoom 14 tile that corresponds with the (0, 0) pixel of this zoom 5 coverage tile
@@ -430,7 +463,10 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
     :param max_lon: of the original bbox of the run
     :param max_lat: of the original bbox of the run
     :param traces_dir: str where we should store the traces output
+    :return: zoom 14 tiles that we will need to traverse for trace sequences
     """
+    found_zoom_14_tiles = []
+
     for layer in tile_pb.layers:
         # This is how we can traverse data within the protobuf
         keys = [v for v in layer.keys]
@@ -508,7 +544,9 @@ def add_z14_tiles_from_coverage_tile_to_bbox_sections(
                             zoom_14_tiles_in_bbox.append(
                                 (candidate_x, candidate_y, trace_filename)
                             )
-                    bbox_sections.extend(zoom_14_tiles_in_bbox)
+                    found_zoom_14_tiles.extend(zoom_14_tiles_in_bbox)
+
+    return found_zoom_14_tiles
 
 
 def bboxes_overlap(
@@ -549,8 +587,6 @@ def get_tile_from_lon_lat(lon: float, lat: float, zoom: int) -> tuple[int, int]:
 def get_lon_lat_from_tile(zoom: int, x: int, y: int) -> tuple[float, float]:
     """
     Turns a Slippy map tile at a given zoom into a lon/lat measurement.
-
-    TODO: What if the tile is "out of bounds"?
     """
     n = 2.0 ** zoom
     lon_deg = x / n * 360.0 - 180.0
