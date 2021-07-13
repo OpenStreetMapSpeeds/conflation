@@ -3,7 +3,7 @@ from math import radians, cos, sin, asin, sqrt
 
 # Configurable constants for filtering
 MINIMUM_MEAN_SPEED = 10  # km / h
-MINIMUM_TOTAL_TIME = 120  # seconds, can travel a couple edges
+MINIMUM_TOTAL_TIME = 55  # seconds, can travel a couple edges
 MINIMUM_TOTAL_DISTANCE = 1000  # meters, about a few city blocks
 MAXIMUM_TIME_BETWEEN_ADJACENT_POINTS = (
     5  # seconds, we need high granularity to make accurate map matches

@@ -314,6 +314,12 @@ def split_bbox(
                 "Bounding box {} not well defined. Must be in the format `min_longitude,min_latitude,max_longitude,"
                 "max_latitude`.".format(bbox)
             )
+        if min_long < -180 or max_long > 180 or min_lat < -90 or max_lat > 90:
+            raise ValueError(
+                "Bounding box {} not well defined. Must be in a valid lat,long range of (-90,-180), (90,180).".format(
+                    bbox
+                )
+            )
 
         # Perform a check to see how many sections would be generated
         num_files = int(
