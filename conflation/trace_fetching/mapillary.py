@@ -11,12 +11,11 @@ from requests.packages.urllib3.util.retry import Retry
 from conflation import util, trace_filter
 from conflation.trace_fetching import vector_tile_pb2
 
-# IMAGES_PER_PAGE_DEFAULT = 1000  # How many images to receive on each page of the API call
 MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # How many sequences to process for each bbox section
     500
 )
-SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to a year old
-    datetime.datetime.now() - datetime.timedelta(days=365)
+SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to five years old
+    datetime.datetime.now() - datetime.timedelta(days=365 * 5)
 )
 SKIP_IF_FEWER_IMAGES_THAN_DEFAULT = (  # We will skip any sequences if they have fewer than this number of images
     30
@@ -43,8 +42,7 @@ def run(
     :param bbox: Bounding box we are searching over, in the format of 'min_lon,min_lat,max_lon,max_lat'
     :param traces_dir: Dir where trace data will be pickled to
     :param tmp_dir: Dir where temp output files will be stored (should be empty upon completion)
-    :param config: Dict of configs. Mandatory keys are ['client_id', 'client_secret']. Optional keys are
-        ['start_date', 'max_sequences_per_bbox_section', 'skip_if_fewer_imgs_than']
+    :param config: Dict of configs. See "--trace-config" section of README for keys
     :param processes: Number of threads to use
     :param access_token: Mapillary v4 access token (obtained through OAuth)
     """
@@ -227,8 +225,7 @@ def make_trace_data_requests(
 
     :param session_: requests.Session() to persist session across API calls
     :param tile: Tuple of [x,y] that represents a tile at z14.
-    :param conf: Dict of configs. Mandatory keys are ['client_id', 'client_secret']. Optional keys are
-        ['start_date', 'max_sequences_per_bbox_section', 'skip_if_fewer_imgs_than']
+    :param conf: Dict of configs. See "--trace-config" section of README for keys
     :return: List of trace data sequences. Trace data is in format understood by Valhalla map matching process, i.e. it
         has 'lon', 'lat', 'time', and optionally 'radius' keys
     """

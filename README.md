@@ -110,20 +110,34 @@ python3 -m conflation --bbox=...
 |----------|----------|
 | `--bbox` | Filter by the bounding box on the map, given as `min_longitude,min_latitude,max_longitude,max_latitude` |
 | `--concurrency` | The number of processes to use while running the script (default your # of cpus) |
-| `--traces-source` | See below |
+| `--trace-config` | Config JSON for the GPS trace provider; see below for more details |
+| `--map-matching-config` | Config JSON for the map matching provider; see below for more details |
 
-For the `--traces-source` argument, a JSON needs to be specified as the value. This JSON holds information on where and
-how to pull the API trace data.
+For the `--trace-config` and `--map-matching-config` arguments, JSONs needs to be specified as the value. Here are the
+keys accepted by both JSONs:
 
-Currently, only Mapillary is supported as an API trace source. The `--traces-source` for Mapillary can hold the
-following keys:
+####--trace-config
+
+Currently, only Mapillary is supported as an API trace provider. The JSON can hold the following keys:
 
 | Key | Behavior |
 |----------|----------|
 | `provider` | Should be set to `mapillary` |
-| `client_id` | The Mapillary Client ID that should be used with the API calls. [More details here](https://www.mapillary.com/developer/api-documentation/#client-id) |
-| `sequences_per_page` | Optional - Number of [Mapillary sequences](https://www.mapillary.com/developer/api-documentation/#sequences) that should be pulled in each API call |
-| `skip_if_fewer_images_than` | Optional - Skip a Mapillary sequence if it has fewer Mapillary images than this value |
+| `client_id` | The Mapillary client ID that should be used for the OAuth flow. [More details here](https://www.mapillary.com/developer/api-documentation#authentication) |
+| `client_secret` | The Mapillary client secret that should be used for the OAuth flow. [More details here](https://www.mapillary.com/developer/api-documentation#authentication) |
+| `start_date` | Optional - Only traces older than this date will be pulled. Default = 5 years ago |
+| `max_sequences_per_bbox_section` | Optional - Number of Mapillary sequences that should be pulled for each bbox section (i.e each zoom 14 tile). Default = 500 |
+| `skip_if_fewer_imgs_than` | Optional - Skip a Mapillary sequence if it has fewer Mapillary images than this value. Default = 30 |
+
+####--map-matching-config
+
+Currently, only Valhalla is supported as a map matching provider. The JSON can hold the following keys:
+
+| Key | Behavior |
+|----------|----------|
+| `provider` | Should be set to `valhalla` |
+| `base_url` | The base URL of your running Valhalla service (example format: `https://aws.my.valhalla.com/`)  |
+| `headers` | Optional - Headers JSON that will be passed along in each call to Valhalla |
 
 
 ## Contributing
