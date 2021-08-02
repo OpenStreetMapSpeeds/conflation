@@ -31,7 +31,7 @@ def run(traces_dir: str, map_matches_dir: str, processes: int, config: dict) -> 
     :param traces_dir: Dir where trace data from step 1 was pickled to
     :param map_matches_dir: Dir where map match results will be pickled to
     :param processes: Number of threads to use
-    :param config: Dict of configs, see the .README or the conf param of add_map_matches_for_shape()
+    :param config: Dict of configs. See "--map-matching-config" section of README for keys
     """
     sections_filename = util.get_sections_filename(traces_dir)
 
@@ -135,7 +135,7 @@ def add_map_matches_for_shape(
 
     :param map_matches: Dict of already existing map matches
     :param shape: "Shape" object that is passed into Valhalla's APIs. See Valhalla's README for more specifications
-    :param conf: Dict of configs. Mandatory keys are ['base_url']. Optional keys are ['headers']
+    :param conf: Dict of configs. See "--map-matching-config" section of README for keys
     """
     body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
     base_url = conf["base_url"]

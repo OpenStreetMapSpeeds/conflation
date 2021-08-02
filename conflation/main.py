@@ -20,13 +20,13 @@ def main():
     arg_parser.add_argument(
         "--trace-config",
         type=str,
-        help='JSON of configurable settings for where / how to pull the GPS trace. See .README for specific fields. E.g. {"provider":"mapillary","client_id":"xxx","client_secret":"xxx","sequences_per_page":50,"skip_if_fewer_images_than":5, "start_date":"2020-01-01"}',
+        help="JSON of configurable settings for where / how to pull the GPS trace. See .README for specific fields.",
         required=True,
     )
     arg_parser.add_argument(
         "--map-matching-config",
         type=str,
-        help='JSON of configurable settings for where / how to perform map matching. See .README for specific fields. E.g. {"provider":"valhalla","base_url":"https://www.my-valhalla.com/","headers":{"some-header-name":"some-header-value"}}',
+        help="JSON of configurable settings for where / how to perform map matching. See .README for specific fields.",
         required=True,
     )
     arg_parser.add_argument(
