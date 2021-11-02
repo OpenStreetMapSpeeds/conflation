@@ -130,15 +130,19 @@ Currently, only Mapillary is supported as an API trace provider. The JSON can ho
 | `skip_if_fewer_imgs_than` | Optional - Skip a Mapillary sequence if it has fewer Mapillary images than this value. Default = 30 |
 
 ##### Mapillary API Client Secret
+
 You can obtain a client secret by doing the following (instructions last updated 11/2021):
+
 * Go to www.mapillary.com, create an account or log in
 * Click on Dashboard (top right corner)
 * Click on "Developers" on the left sidebar
 * Click on "Register application" and fill out the form
-  * Feel free to simply use http://localhost:8080/ as the "Callback URL" and https://github.com/OpenStreetMapSpeeds as the "Company website"
-  * Allow this application to READ
+    * Feel free to simply use http://localhost:8080/ as the "Callback URL" and https://github.com/OpenStreetMapSpeeds as
+      the "Company website"
+    * Allow this application to READ
 * Click on "View" under "Client secret" once the application is created
-* It will look something like this: `MLY|123456789|abcd1234` – only the part after the second `|` is necessary (i.e. `"client_secret":"abcd1234"`)
+* It will look something like this: `MLY|123456789|abcd1234` – only the part after the second `|` is necessary (
+  i.e. `"client_secret":"abcd1234"`)
 
 #### --map-matching-config
 
