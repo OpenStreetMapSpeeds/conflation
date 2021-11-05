@@ -11,7 +11,7 @@ from requests.packages.urllib3.util.retry import Retry
 from conflation import util, trace_filter
 from conflation.trace_fetching import vector_tile_pb2
 
-MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # How many sequences to process for each bbox section
+MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # Max number of sequences IDs to pull for each z14 tile by default
     500
 )
 SEQUENCE_START_DATE_DEFAULT = (  # By default we only consider sequences up to five years old
@@ -41,8 +41,10 @@ def run(
     bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int, access_token: str
 ) -> None:
     """
-    Entrypoint for pulling trace date from Mapillary APIs. Will pull all trace data in the given bbox and store it in
-    the traces_dir, using the number of processes specified and any conf values from the `config` JSON.
+    Entrypoint for pulling trace date from Mapillary APIs. Will pull all Mapillary sequence IDs in the given bbox and
+    store them temporarily so that we can find all unique sequences. Then, we pull the images (traces) for each sequence
+    and store it in the traces_dir. Both these steps use the number of processes specified and any conf values from the
+    `config` JSON.
 
     :param bbox: Bounding box we are searching over, in the format of 'min_lon,min_lat,max_lon,max_lat'
     :param traces_dir: Dir where trace data will be pickled to
@@ -79,11 +81,9 @@ def run(
     # Break the bbox into sections and save it to a pickle file
     bbox_sections = split_bbox(session, sequence_ids_dir, bbox, access_token, start_date_epoch)
 
+    # Multiprocess values to keep track of progress when we are running multi-threaded tasks
     finished_bbox_sections = multiprocessing.Value("i", 0)
     finished_sequence_id_blocks = multiprocessing.Value("i", 0)
-
-    # Adding these "temporary" counters so that we can make some estimates of how much time is wasted due to seeing
-    # duplicate sequences across different z14 tiles
     skipped_sequences_due_to_filters = multiprocessing.Value("i", 0)
 
     with multiprocessing.Pool(
@@ -166,7 +166,6 @@ def run(
             )
         )
 
-        # TODO: Delete the tmp dir after run?
         return
 
 
@@ -214,28 +213,24 @@ def initialize_multiprocess(
 
 def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
     """
-    FIXME
-    Checks to see if a bbox section already has trace data pulled onto disk. If not, pulls it from Mapillary by calling
-    make_trace_data_requests(), filters it using trace_filer.run(), and saves it to disk. Writes to a temp file first
-    to avoid issues if script crashes during the pickle dump. Meant to be run in a multi-threaded manner and references
-    global vars made by initialize_multiprocess().
+    First, check to see if a bbox section already had sequence IDs pulled onto disk. If not, pull all sequence IDs
+    within the current bbox section from Mapillary by calling make_sequence_ids_requests() and save it to disk. Meant to
+    be run in a multi-threaded manner and references global vars made by initialize_multiprocess().
 
     :param bbox_section: tuple where [0:1] indices: [x,y] coordinate of the zoom 14 tile, [2] index: the filename where
-        the pulled trace data should be stored
+        the pulled sequence IDs should be stored
     """
     try:
-        tile, trace_filename = bbox_section[0:2], bbox_section[2]
-        processed_trace_filename = util.get_processed_trace_filename(trace_filename)
+        tile, sequence_ids_filename = bbox_section[0:2], bbox_section[2]
 
-        # If either we have already pulled trace data to disk, or if it's been pulled AND processed by map_matching,
-        # don't pull it again.
-        if os.path.exists(trace_filename) or os.path.exists(processed_trace_filename):
+        # If either we have already pulled sequence IDs to disk, don't pull it again
+        if os.path.exists(sequence_ids_filename):
             print("Seq IDs already exists on disk for tile={}. Skipping...".format(tile))
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
             return
 
-        sequence_ids: set[str] = pull_sequence_ids(session, tile, global_config)
+        sequence_ids: set[str] = make_sequence_ids_requests(session, tile, global_config)
 
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
@@ -243,7 +238,7 @@ def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
             global_tmp_dir, "_".join([str(c) for c in tile]) + ".pickle"
         )
         pickle.dump(sequence_ids, open(temp_filename, "wb"))
-        os.rename(temp_filename, trace_filename)
+        os.rename(temp_filename, sequence_ids_filename)
 
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
@@ -255,14 +250,12 @@ def pull_filter_and_save_trace_for_sequence_ids(
     sequence_id_blocks: tuple[list[str], str]
 ) -> None:
     """
-    FIXME
-    Checks to see if a bbox section already has trace data pulled onto disk. If not, pulls it from Mapillary by calling
-    make_trace_data_requests(), filters it using trace_filer.run(), and saves it to disk. Writes to a temp file first
-    to avoid issues if script crashes during the pickle dump. Meant to be run in a multi-threaded manner and references
-    global vars made by initialize_multiprocess().
+    First, check to see if a sequence ID block already has trace data pulled onto disk. If not, pull it from Mapillary
+    by calling make_trace_data_requests(), filter it using trace_filer.run(), and save it to disk. There is a Meant to
+    be run in a multi-threaded manner and references global vars made by initialize_multiprocess().
 
-    :param bbox_section: tuple where [0:1] indices: [x,y] coordinate of the zoom 14 tile, [2] index: the filename where
-        the pulled trace data should be stored
+    :param sequence_id_blocks: tuple where [0] index: list of sequence IDs to pull traces for, [1] index: the filename
+        where the pulled trace data should be stored
     """
     try:
         sequence_id_block, trace_filename = sequence_id_blocks[0], sequence_id_blocks[1]
@@ -307,16 +300,25 @@ def pull_filter_and_save_trace_for_sequence_ids(
         print("ERROR: Failed to pull trace data: {}".format(repr(e)))
 
 
-def pull_sequence_ids(
+def make_sequence_ids_requests(
     session_: requests.Session, tile: tuple[int, int], conf: any
 ) -> set[str]:
+    """
+    Makes the call to the Mapillary API to pull sequence IDs for a given tile at zoom 14.
+
+    :param session_: requests.Session() to persist session across API calls
+    :param tile: Tuple of [x,y] that represents a tile at z14
+    :param conf: Dict of configs. See "--trace-config" section of README for keys
+    :return: List of sequence IDs within the tile
+    """
     max_sequences_per_bbox_section = (
         conf["max_sequences_per_bbox_section"]
         if "max_sequences_per_bbox_section" in conf
         else MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT
     )
 
-    # We will use this set to skip sequences we've already processed
+    # We will use this set to make sure the sequences we pull here are all unique (Mapillary does have occasional bugs
+    # with duplicates)
     seen_sequences = set()
 
     resp = session_.get(
@@ -359,11 +361,10 @@ def make_trace_data_requests(
     session_: requests.Session, sequence_ids: list[str], conf: any
 ) -> list[list[dict]]:
     """
-    FIXME
-    Makes the actual calls to Mapillary API to pull trace data for a given tile at zoom 14.
+    Makes the calls to the Mapillary API to pull trace data for a given list of sequence IDs.
 
     :param session_: requests.Session() to persist session across API calls
-    :param tile: Tuple of [x,y] that represents a tile at z14.
+    :param sequence_ids: List of strings representing Mapillary sequence IDs
     :param conf: Dict of configs. See "--trace-config" section of README for keys
     :return: List of trace data sequences. Trace data is in format understood by Valhalla map matching process, i.e. it
         has 'lon', 'lat', 'time', and optionally 'radius' keys
@@ -403,8 +404,22 @@ def make_trace_data_requests(
     return sequences
 
 
-def find_unique_sequence_ids(bbox_sections, traces_dir) -> list[tuple[list[str], str]]:
-    # FIXME: Docstring and types
+def find_unique_sequence_ids(
+    bbox_sections: list[tuple[int, int, str]], traces_dir: str
+) -> list[tuple[list[str], str]]:
+    """
+    Goes through all the sequence IDs that were pulled for each bbox section (i.e. z14 tile), reads them all into
+    memory, and keeps a unique master list of sequence IDs that we'll need to pull. Then, it splits this master list
+    into blocks of size SEQUENCE_ID_BLOCK_SIZE. Finally, it includes the filename of where the trace data for each block
+    of IDs should be stored.
+
+    :param bbox_sections: list of tuples where the final [-1] index gives us the filename where the pulled sequence IDs
+        were stored
+    :param traces_dir: the dir where the pulled trace data should be stored
+    :return: list of tuples where [0] index: list of sequence IDs to pull traces for, [1] index: the filename where the
+        pulled trace data should be stored
+    """
+    # First, aggregate all the unique sequence IDs that were pulled
     unique_sequence_ids: set[str] = set()
     total_sequence_ids_count = 0
 
@@ -420,17 +435,17 @@ def find_unique_sequence_ids(bbox_sections, traces_dir) -> list[tuple[list[str],
         )
     )
 
+    # Then, build the blocks of unique sequence IDs
     sequence_id_blocks = []
     unique_sequence_ids_list: list[str] = list(unique_sequence_ids)
-    block_num = 0
+    block_num = 0  # Used for the filename where the traces will be stored
     for i in range(0, len(unique_sequence_ids_list), SEQUENCE_ID_BLOCK_SIZE):
         trace_filename = os.path.join(traces_dir, "block_{}.pickle".format(block_num))
+        block_num += 1
 
         sequence_id_blocks.append(
             (unique_sequence_ids_list[i : i + SEQUENCE_ID_BLOCK_SIZE], trace_filename)
         )
-
-        block_num += 1
 
     return sequence_id_blocks
 

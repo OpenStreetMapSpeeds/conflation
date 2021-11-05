@@ -2,6 +2,7 @@
 import argparse
 import json
 import multiprocessing
+import shutil
 
 from conflation import aggregation, util
 from conflation.map_matching import valhalla
@@ -110,6 +111,9 @@ def main():
     # each row is a per-edge measurement
     print("Map matching complete, aggregating data into final .json output files...")
     aggregation.run(map_matches_dir, results_dir)
+
+    # Delete the tmp dir since we are finished with the run
+    shutil.rmtree(tmp_dir)
 
     print("Done!")
 
