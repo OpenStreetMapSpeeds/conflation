@@ -298,7 +298,6 @@ def pull_filter_and_save_trace_for_sequence_ids(
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
         temp_filename = os.path.join(global_tmp_dir, os.path.basename(trace_filename))
-        print(temp_filename)
         pickle.dump(trace_data, open(temp_filename, "wb"))
         os.rename(temp_filename, trace_filename)
 
