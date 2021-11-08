@@ -1,3 +1,4 @@
+import logging
 import multiprocessing
 import os
 import pickle
@@ -42,7 +43,7 @@ def run(traces_dir: str, map_matches_dir: str, processes: int, config: dict) -> 
         )
 
     try:
-        print("Reading bbox_sections from disk...")
+        logging.info("Reading bbox_sections from disk...")
         bbox_sections: list[tuple[str, str]] = pickle.load(open(sections_filename, "rb"))
     except (OSError, IOError):
         raise FileNotFoundError(
@@ -63,10 +64,10 @@ def run(traces_dir: str, map_matches_dir: str, processes: int, config: dict) -> 
             result.wait(timeout=5)
             next_progress = int(finished_bbox_sections.value / len(bbox_sections) * 100)
             if int(next_progress / increment) > progress:
-                print("Current progress: {}%".format(next_progress))
+                logging.info("Current progress: {}%".format(next_progress))
                 progress = int(next_progress / increment)
         if progress != 100 / increment:
-            print("Current progress: 100%")
+            logging.info("Current progress: 100%")
 
 
 def initialize_multiprocess(
@@ -106,7 +107,7 @@ def map_match_for_bbox(bbox_sections: tuple) -> None:
 
         # Check to see if the trace has already been processed by map_matching
         if os.path.exists(processed_trace_filename):
-            print("Map matching already complete for bbox={}. Skipping...".format(bbox))
+            logging.info("Map matching already complete for bbox={}. Skipping...".format(bbox))
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
             return
@@ -122,7 +123,7 @@ def map_match_for_bbox(bbox_sections: tuple) -> None:
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
     except Exception as e:
-        print("ERROR: Failed to map match using Valhalla: {}".format(repr(e)))
+        logging.error("Failed to map match using Valhalla: {}".format(repr(e)))
 
 
 def add_map_matches_for_shape(
@@ -151,7 +152,7 @@ def add_map_matches_for_shape(
         # 400 Error code from Valhalla simply means that a match could not be made. This is fine, we'll just skip the
         # sequence.
         if resp.status_code == 400:
-            print("Skipping b/c 400 response from Valhalla: {}".format(resp.json()))
+            logging.warning("Skipping b/c 400 response from Valhalla: {}".format(resp.json()))
             return
 
         # Any other status code and we want to report an error.
@@ -164,7 +165,7 @@ def add_map_matches_for_shape(
     resp = resp.json()
 
     if has_too_many_unmatched(resp["matched_points"]):
-        print("Skipping b/c too many points unmatched")
+        logging.debug("Skipping map match b/c too many points unmatched")
         return
 
     prev_t = resp["edges"][0]["end_node"]["elapsed_time"]
@@ -181,7 +182,11 @@ def add_map_matches_for_shape(
 
         # The elapsed time should be monotonically increasing. If not, this is a bad match and we will skip it
         if t < prev_t:
-            print("Skipping b/c time not monotonically increasing {} -> {}".format(prev_t, t))
+            logging.debug(
+                "Skipping map match b/c time not monotonically increasing {} -> {}".format(
+                    prev_t, t
+                )
+            )
             return
         # If the elapsed time doesn't increase for some reason, we can't make any measurement here, so we will ignore it
         if t == prev_t:
@@ -193,7 +198,9 @@ def add_map_matches_for_shape(
 
         # Skip measurements that are going too fast
         if kph > MAXIMUM_SPEED:
-            print("Skipping b/c kph of {} > limit of {}".format(kph, MAXIMUM_SPEED))
+            logging.debug(
+                "Skipping map match b/c kph of {} > limit of {}".format(kph, MAXIMUM_SPEED)
+            )
             return
 
         # Ordered tuple that holds all the information that we need to classify this edge, as well as the speed
@@ -219,8 +226,8 @@ def write_map_matches(
             try:
                 os.mkdir(country_dir)
             except Exception as e:
-                print(
-                    "WARNING: Received exception while trying to mkdir {}, assuming it already exists...: {}".format(
+                logging.warning(
+                    "Received exception while trying to mkdir {}, assuming it already exists...: {}".format(
                         country_dir, repr(e)
                     )
                 )
@@ -228,7 +235,7 @@ def write_map_matches(
             region_filename = util.get_map_match_region_filename_with_identifier(
                 country_dir, region
             )
-            print(
+            logging.info(
                 "Creating region file of len = {} under {}...".format(
                     len(rows), region_filename
                 )

@@ -11,6 +11,7 @@ continue with the rest of the work
 Usage::
     ./server.py mapillary_client_id mapillary_client_secret
 """
+import logging
 import requests
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -58,12 +59,12 @@ def run(
 
     server_address = ("localhost", port)
     httpd = server_class(server_address, handler_class)
-    print("Starting httpd and opening Mapillary to authenticate...")
+    logging.info("Starting httpd and opening Mapillary to authenticate...")
     try:
         webbrowser.open_new_tab(AUTH_URL.format(client_id))
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     httpd.server_close()
-    print("Stopping httpd...")
+    logging.info("Stopping httpd...")
     return access_token

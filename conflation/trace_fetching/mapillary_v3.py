@@ -1,4 +1,5 @@
 import datetime
+import logging
 import multiprocessing
 import os
 import pickle
@@ -51,19 +52,18 @@ def run(bbox: str, traces_dir: str, tmp_dir: str, config: dict, processes: int) 
     ) as pool:
         result = pool.map_async(pull_filter_and_save_trace_for_bbox, bbox_sections)
 
-        print("Placing {} results in {}...".format(len(bbox_sections), traces_dir))
+        logging.info("Placing {} results in {}...".format(len(bbox_sections), traces_dir))
         progress = 0
         increment = 5
         while not result.ready():
             result.wait(timeout=5)
             next_progress = int(finished_bbox_sections.value / len(bbox_sections) * 100)
             if int(next_progress / increment) > progress:
-                print("Current progress: {}%".format(next_progress))
+                logging.info("Current progress: {}%".format(next_progress))
                 progress = int(next_progress / increment)
         if progress != 100 / increment:
-            print("Current progress: 100%")
+            logging.info("Current progress: 100%")
 
-        # TODO: Delete the tmp dir after run?
         return 1
 
 
@@ -130,18 +130,18 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
         # If either we have already pulled trace data to disk, or if it's been pulled AND processed by map_matching,
         # don't pull it again.
         if os.path.exists(trace_filename) or os.path.exists(processed_trace_filename):
-            print("Seq already exists on disk for bbox={}. Skipping...".format(bbox))
+            logging.info("Seq already exists on disk for bbox={}. Skipping...".format(bbox))
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
             return
 
         # We haven't pulled API trace data for this bbox section yet
         trace_data = make_trace_data_requests(session, bbox, global_config)
-        print("Before filter: lens: {}".format([len(t) for t in trace_data]))
+        logging.debug("Before filter: lens: {}".format([len(t) for t in trace_data]))
 
         # Perform some simple filters to weed out bad trace data
         trace_data = trace_filter.run(trace_data)
-        print("After filter: lens: {}".format([len(t) for t in trace_data]))
+        logging.debug("After filter: lens: {}".format([len(t) for t in trace_data]))
 
         # Avoids potential partial write issues by writing to a temp file and then as a final operation, then renaming
         # to the real location
@@ -152,7 +152,7 @@ def pull_filter_and_save_trace_for_bbox(bbox_section: tuple[str, str]) -> None:
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
     except Exception as e:
-        print("ERROR: Failed to pull trace data: {}".format(repr(e)))
+        logging.error("Failed to pull trace data: {}".format(repr(e)))
 
 
 def make_trace_data_requests(
@@ -197,11 +197,11 @@ def make_trace_data_requests(
     start_date = conf["start_date"] if "start_date" in conf else SEQUENCE_START_DATE_DEFAULT
 
     # Paginate sequences within this bbox
-    print("@ MAPILLARY: Getting seq for bbox={}".format(bbox))
+    logging.debug("@ MAPILLARY: Getting seq for bbox={}".format(bbox))
     seq_next_url = SEQUENCE_URL.format(map_client_id, bbox, seq_per_page, start_date)
     seq_page = 1
     while seq_next_url:
-        print("@@ MAPILLARY: Seq Page {}, url={}".format(seq_page, seq_next_url))
+        logging.debug("@@ MAPILLARY: Seq Page {}, url={}".format(seq_page, seq_next_url))
         seq_resp = session_.get(seq_next_url, timeout=10)
         seq_ids = []
         for seq_f in seq_resp.json()["features"]:
@@ -209,7 +209,7 @@ def make_trace_data_requests(
 
             # If we've already processed this seq_id before, skip it, otherwise we will be writing duplicate image data
             if seq_id in sequences_by_id:
-                print(
+                logging.debug(
                     "@@@ MAPILLARY: Skipping seq_id={} b/c we've already seen it on a previous page".format(
                         seq_id
                     )
@@ -219,7 +219,7 @@ def make_trace_data_requests(
             # Only process sequences that originated from this bbox. This prevents us from processing sequences twice
             origin_lon, origin_lat = seq_f["geometry"]["coordinates"][0]
             if not is_within_bbox(origin_lon, origin_lat, bbox_as_list):
-                print(
+                logging.debug(
                     "@@@ MAPILLARY: Skipping seq b/c origin ({}, {}) not in bbox {}".format(
                         origin_lon, origin_lat, bbox
                     )
@@ -237,7 +237,9 @@ def make_trace_data_requests(
             img_next_url = IMAGES_URL.format(map_client_id, ",".join(seq_ids), img_per_page)
             img_page = 1
             while img_next_url:
-                print("@@@ MAPILLARY: Image Page {}, url={}".format(img_page, img_next_url))
+                logging.debug(
+                    "@@@ MAPILLARY: Image Page {}, url={}".format(img_page, img_next_url)
+                )
                 img_resp = session_.get(img_next_url, timeout=10)
                 for img_f in img_resp.json()["features"]:
                     if img_f["properties"]["sequence_key"] not in sequences_by_id:
@@ -260,10 +262,9 @@ def make_trace_data_requests(
 
         # Already collected enough sequences. Move onto the next bbox section
         if len(sequences_by_id) > max_sequences_per_bbox_section:
-            print(
-                "## Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}. Continuing...".format(
-                    len(sequences_by_id), max_sequences_per_bbox_section
-                )
+            logging.info(
+                "Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}. "
+                "Continuing...".format(len(sequences_by_id), max_sequences_per_bbox_section)
             )
             break
 
@@ -271,7 +272,7 @@ def make_trace_data_requests(
         seq_next_url = seq_resp.links["next"]["url"] if "next" in seq_resp.links else None
         seq_page += 1
 
-    print("Keys: {}".format(list(sequences_by_id.keys())))
+    logging.debug("Keys: {}".format(list(sequences_by_id.keys())))
 
     # We don't care about the sequence IDs anymore (just using it as a method to group trace data), so we just return
     # values
@@ -303,10 +304,10 @@ def split_bbox(
     sections_filename = util.get_sections_filename(traces_dir)
 
     try:
-        print("Reading bbox_sections from disk...")
+        logging.info("Reading bbox_sections from disk...")
         bbox_sections: list[tuple[str, str]] = pickle.load(open(sections_filename, "rb"))
     except (OSError, IOError):
-        print("bbox_sections pickle not found. Creating and writing to disk...")
+        logging.info("bbox_sections pickle not found. Creating and writing to disk...")
         min_long, min_lat, max_long, max_lat = [float(s) for s in bbox.split(",")]
         # Small sanity checks
         if max_long <= min_long or max_lat <= min_lat:
@@ -329,12 +330,12 @@ def split_bbox(
         if num_files > MAX_FILES_IN_DIR:
             # TODO: Split up the bbox sections further into 'pages', and use these as different dirs to put output
             #  in, that way we won't ever have too many files in one dir
-            print(
-                "WARNING: {} bbox sections will be generated and a .pickle file will be created for all of them, "
+            logging.warning(
+                "{} bbox sections will be generated and a .pickle file will be created for all of them, "
                 "violating the MAX_FILES_IN_DIR={}".format(num_files, MAX_FILES_IN_DIR)
             )
         else:
-            print("{} bbox sections will be generated...".format(num_files))
+            logging.info("{} bbox sections will be generated...".format(num_files))
 
         bbox_sections = []
         prev_long = min_long

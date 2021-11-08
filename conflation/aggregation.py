@@ -1,5 +1,6 @@
 import copy
 import json
+import logging
 import os
 import pandas as pd
 import pickle
@@ -72,7 +73,7 @@ def run(map_matches_dir: str, results_dir: str) -> None:
     # Check to see if the final result has already been processed
     final_config_filename = util.get_final_config_filename(results_dir)
     if os.path.exists(final_config_filename):
-        print("Final config already built. Skipping...")
+        logging.info("Final config already built. Skipping...")
         return
 
     final_config = []
@@ -89,14 +90,14 @@ def run(map_matches_dir: str, results_dir: str) -> None:
             # Pull map matches from disk
             map_match_data_filename = os.path.join(subdir, file)
             try:
-                print(
+                logging.info(
                     "Reading {}/{} map match results from file {}".format(
                         country, region, map_match_data_filename
                     )
                 )
                 map_match_data: list[tuple] = pickle.load(open(map_match_data_filename, "rb"))
             except (OSError, IOError):
-                print("ERROR: {} pickle could not be loaded. Cannot perform aggregation.")
+                logging.critical("{} pickle could not be loaded. Cannot perform aggregation.")
                 continue
 
             # Combine the data with other data from the same region
@@ -189,6 +190,6 @@ def measurements_to_config(
         elif type_ in ["driveway", "alley", "parking_aisle", "drive-through"]:
             config[density][type_] = kph
         else:
-            print("WARNING: type {} not supported".format(type))
+            logging.warning("Type {} not supported".format(type))
 
     return config

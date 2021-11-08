@@ -13,12 +13,12 @@ FINAL_RESULTS_FILENAME = "config.json"
 MAP_MATCH_REGION_FILENAME_DELIMITER = "-"
 
 
-def initialize_dirs(bbox_str: str) -> tuple[str, str, str, str]:
+def initialize_dirs(bbox_str: str) -> tuple[str, str, str, str, str]:
     """
     Creates all dirs needed for run if they don't exist.
 
     :param bbox_str: bbox string from arg :return: tuple of (traces dir name, tmp dir name for any tmp pickle files,
-        map match results dir name, final results dir name)
+        map match results dir name, final results dir name, path to where the log should be stored)
     """
 
     # Use a hash function to generate an "ID" for this bbox. Helped to detect duplicate runs.
@@ -30,11 +30,11 @@ def initialize_dirs(bbox_str: str) -> tuple[str, str, str, str]:
         os.path.dirname(os.getcwd()), OUTPUT_DIR, bbox, MAP_MATCH_DIR
     )
     results_dir = os.path.join(os.path.dirname(os.getcwd()), OUTPUT_DIR, bbox, RESULTS_DIR)
-    # Make the output tmp, and result dirs if it does not exist yet
-    if not os.path.exists(tmp_dir):
-        os.makedirs(  # Makes all dirs recursively, so we know "output/" will also now exist
-            traces_dir
-        )
+    log_filename = os.path.join(os.path.dirname(os.getcwd()), OUTPUT_DIR, bbox, "run.log")
+
+    # Make the dirs if it does not exist yet. Makes all dirs recursively, so we know "output/" will also now exist
+    if not os.path.exists(traces_dir):
+        os.makedirs(traces_dir)
     if not os.path.exists(tmp_dir):
         os.makedirs(tmp_dir)
     if not os.path.exists(map_matches_dir):
@@ -42,7 +42,7 @@ def initialize_dirs(bbox_str: str) -> tuple[str, str, str, str]:
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
 
-    return traces_dir, tmp_dir, map_matches_dir, results_dir
+    return traces_dir, tmp_dir, map_matches_dir, results_dir, log_filename
 
 
 def get_sha1_truncated_id(s: str) -> str:

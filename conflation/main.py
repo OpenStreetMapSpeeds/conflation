@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import logging
 import multiprocessing
 import shutil
 import time
@@ -37,24 +38,40 @@ def main():
         help="The number of processes to use to make requests, by default your # of cpus",
         default=multiprocessing.cpu_count(),
     )
+    arg_parser.add_argument(
+        "--logging",
+        type=str,
+        help='The logging level from ["debug", "info", "warning", "error", "critical"], by default "info"',
+        default="info",
+    )
 
-    # TODO: Change print() to use logger and add logging level as arg
-
-    # Log time taken for the run
+    # Record start time for tracking runtimes
     start = time.time()
 
     parsed_args = arg_parser.parse_args()
 
     # Create dirs
     bbox = parsed_args.bbox
-    traces_dir, tmp_dir, map_matches_dir, results_dir = util.initialize_dirs(bbox)
+    traces_dir, tmp_dir, map_matches_dir, results_dir, log_filename = util.initialize_dirs(
+        bbox
+    )
 
-    print("Pulling trace data from API...")
+    # Set up logging (we do this after creating dirs so we can put the logs in a file under the dir we created)
+    logging.basicConfig(
+        level=getattr(logging, parsed_args.logging.upper(), None),
+        format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+        datefmt="%Y/%m/%d %H:%M:%S",
+        handlers=[logging.FileHandler(log_filename, mode="w"), logging.StreamHandler()],
+    )
+
+    logging.info("Pulling trace data from API...")
     # Determine source of trace data specified by config
     try:
         trace_config = json.loads(parsed_args.trace_config)
     except json.decoder.JSONDecodeError:
-        print("ERROR: Could not parse --trace-config JSON={}".format(parsed_args.trace_config))
+        logging.critical(
+            "Could not parse --trace-config JSON={}".format(parsed_args.trace_config)
+        )
         raise
 
     # Pull and filter trace data
@@ -90,13 +107,13 @@ def main():
             )
         )
 
-    print("Trace data pulled, map matching...")
+    logging.info("Trace data pulled, map matching...")
     # Determine source of map matching specified by config
     try:
         map_matching_config = json.loads(parsed_args.map_matching_config)
     except json.decoder.JSONDecodeError:
-        print(
-            "ERROR: Could not parse --map-matching-config JSON={}".format(
+        logging.critical(
+            "Could not parse --map-matching-config JSON={}".format(
                 parsed_args.map_matching_config
             )
         )
@@ -113,7 +130,7 @@ def main():
 
     # Next step: directories grouped by country, files grouped by region, files will be .pickles of lists where
     # each row is a per-edge measurement
-    print("Map matching complete, aggregating data into final .json output files...")
+    logging.info("Map matching complete, aggregating data into final .json output files...")
     aggregation.run(map_matches_dir, results_dir)
 
     # Delete the tmp dir since we are finished with the run
@@ -121,7 +138,7 @@ def main():
 
     # Print out the time elapsed for this entire run
     end = time.time()
-    print("Script finished run in {} seconds.".format(end - start))
+    logging.info("Script finished run in {} seconds.".format(end - start))
 
 
 if __name__ == "__main__":
