@@ -251,7 +251,7 @@ def pull_filter_and_save_trace_for_sequence_ids(
 ) -> None:
     """
     First, check to see if a sequence ID block already has trace data pulled onto disk. If not, pull it from Mapillary
-    by calling make_trace_data_requests(), filter it using trace_filer.run(), and save it to disk. There is a Meant to
+    by calling make_trace_data_requests(), filter it using trace_filer.run(), and save it to disk. This is meant to
     be run in a multi-threaded manner and references global vars made by initialize_multiprocess().
 
     :param sequence_id_blocks: tuple where [0] index: list of sequence IDs to pull traces for, [1] index: the filename
