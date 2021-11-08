@@ -299,8 +299,8 @@ def pull_filter_and_save_trace_for_sequence_ids(
         pickle.dump(trace_data, open(temp_filename, "wb"))
         os.rename(temp_filename, trace_filename)
 
-        with finished_bbox_sections.get_lock():
-            finished_bbox_sections.value += 1
+        with finished_sequence_id_blocks.get_lock():
+            finished_sequence_id_blocks.value += 1
     except Exception as e:
         logging.error("Failed to pull trace data: {}".format(repr(e)))
 
