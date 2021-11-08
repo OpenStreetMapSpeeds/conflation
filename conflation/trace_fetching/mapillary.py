@@ -1,4 +1,5 @@
 import datetime
+import logging
 import math
 import multiprocessing
 import os
@@ -108,13 +109,15 @@ def run(
         # if it does then we don't need to pull sequence IDs from Mapillary again
         traces_sections_filename = util.get_sections_filename(traces_dir)
         try:
-            print("Reading sequence ID sections from disk...")
-            bbox_sections: list[tuple[int, int, str]] = pickle.load(
+            logging.info("Reading sequence ID sections from disk...")
+            sequence_id_blocks: list[tuple[list[str], str]] = pickle.load(
                 open(traces_sections_filename, "rb")
             )
         except (OSError, IOError):
-            print("Sequence ID sections pickle not found. Creating and writing to disk...")
-            print(
+            logging.info(
+                "Sequence ID sections pickle not found. Creating and writing to disk..."
+            )
+            logging.info(
                 "Placing {} sequence IDs from z14 tiles in {}...".format(
                     len(bbox_sections), sequence_ids_dir
                 )
@@ -125,13 +128,13 @@ def run(
                 result.wait(timeout=5)
                 next_progress = int(finished_bbox_sections.value / len(bbox_sections) * 100)
                 if int(next_progress / increment) > progress:
-                    print("Current progress: {}%".format(next_progress))
+                    logging.info("Current progress: {}%".format(next_progress))
                     progress = int(next_progress / increment)
             if progress != 100 / increment:
-                print("Current progress: 100%")
+                logging.info("Current progress: 100%")
 
             # Get all the unique sequence IDs that were pulled from the previous step
-            print(
+            logging.info(
                 "Reading sequence IDs from all z14 tiles and generating blocks of {} unique sequence IDs...".format(
                     SEQUENCE_ID_BLOCK_SIZE
                 )
@@ -146,7 +149,7 @@ def run(
             pull_filter_and_save_trace_for_sequence_ids, sequence_id_blocks
         )
 
-        print("Placing {} results in {}...".format(len(sequence_id_blocks), traces_dir))
+        logging.info("Placing {} results in {}...".format(len(sequence_id_blocks), traces_dir))
         progress = 0
         increment = 5
         while not result.ready():
@@ -155,13 +158,13 @@ def run(
                 finished_sequence_id_blocks.value / len(sequence_id_blocks) * 100
             )
             if int(next_progress / increment) > progress:
-                print("Current progress: {}%".format(next_progress))
+                logging.info("Current progress: {}%".format(next_progress))
                 progress = int(next_progress / increment)
         if progress != 100 / increment:
-            print("Current progress: 100%")
+            logging.info("Current progress: 100%")
 
-        print(
-            "INFO: {} sequences were skipped because of filters.".format(
+        logging.info(
+            "Note: {} sequences were skipped because of filters.".format(
                 skipped_sequences_due_to_filters.value
             )
         )
@@ -225,7 +228,9 @@ def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
 
         # If either we have already pulled sequence IDs to disk, don't pull it again
         if os.path.exists(sequence_ids_filename):
-            print("Seq IDs already exists on disk for tile={}. Skipping...".format(tile))
+            logging.info(
+                "Seq IDs already exists on disk for tile={}. Skipping...".format(tile)
+            )
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
             return
@@ -243,7 +248,7 @@ def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
     except Exception as e:
-        print("ERROR: Failed to pull sequence IDs: {}".format(repr(e)))
+        logging.error("Failed to pull sequence IDs: {}".format(repr(e)))
 
 
 def pull_filter_and_save_trace_for_sequence_ids(
@@ -264,7 +269,7 @@ def pull_filter_and_save_trace_for_sequence_ids(
         # If either we have already pulled trace data to disk, or if it's been pulled AND processed by map_matching,
         # don't pull it again.
         if os.path.exists(trace_filename) or os.path.exists(processed_trace_filename):
-            print(
+            logging.info(
                 "Traces already exists on disk for sequence_id_block={}. Skipping...".format(
                     sequence_id_block
                 )
@@ -297,7 +302,7 @@ def pull_filter_and_save_trace_for_sequence_ids(
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
     except Exception as e:
-        print("ERROR: Failed to pull trace data: {}".format(repr(e)))
+        logging.error("Failed to pull trace data: {}".format(repr(e)))
 
 
 def make_sequence_ids_requests(
@@ -348,8 +353,8 @@ def make_sequence_ids_requests(
 
         # Already collected enough sequences. Move onto the next bbox section
         if len(seen_sequences) > max_sequences_per_bbox_section:
-            print(
-                "NOTE: Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}"
+            logging.info(
+                "Note: Already collected {} seqs for this bbox section, greater than max_sequences_per_bbox_section={}"
                 ". Continuing...".format(len(seen_sequences), max_sequences_per_bbox_section)
             )
             break
@@ -429,8 +434,8 @@ def find_unique_sequence_ids(
         unique_sequence_ids.update(sequence_ids)
         total_sequence_ids_count += len(sequence_ids)
 
-    print(
-        "INFO: Out of {} sequence IDs, {} were unique.".format(
+    logging.info(
+        "Note: Out of {} sequence IDs, {} were unique.".format(
             total_sequence_ids_count, len(unique_sequence_ids)
         )
     )
@@ -472,10 +477,10 @@ def split_bbox(
     sections_filename = util.get_sections_filename(storage_dir)
 
     try:
-        print("Reading bbox_sections from disk...")
+        logging.info("Reading bbox_sections from disk...")
         bbox_sections: list[tuple[int, int, str]] = pickle.load(open(sections_filename, "rb"))
     except (OSError, IOError):
-        print("bbox_sections pickle not found. Creating and writing to disk...")
+        logging.info("bbox_sections pickle not found. Creating and writing to disk...")
         min_lon, min_lat, max_lon, max_lat = [float(s) for s in bbox.split(",")]
         # Small sanity checks
         if max_lon <= min_lon or max_lat <= min_lat:
@@ -492,7 +497,7 @@ def split_bbox(
         start_x, end_x = min(tile1[0], tile2[0]), max(tile1[0], tile2[0])
         start_y, end_y = min(tile1[1], tile2[1]), max(tile1[1], tile2[1])
 
-        print(
+        logging.info(
             "Searching through zoom=5 tiles from ({}, {}) to ({}, {})".format(
                 start_x, start_y, end_x, end_y
             )

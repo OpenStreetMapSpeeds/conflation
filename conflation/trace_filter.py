@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 from math import radians, cos, sin, asin, sqrt
 
@@ -37,8 +38,10 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
 
         # Skip if time spent on sequence isn't long enough
         if sequence[-1]["time"] - sequence[0]["time"] < MINIMUM_TOTAL_TIME:
-            print(
-                "Skipping b/c min time {}".format(sequence[-1]["time"] - sequence[0]["time"])
+            logging.debug(
+                "Skipping trace b/c min time {}".format(
+                    sequence[-1]["time"] - sequence[0]["time"]
+                )
             )
             continue
 
@@ -67,7 +70,7 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
             # than a previous trace's timestamp, something is wrong with this sequence so we will throw it away to
             # be safe
             if t < 0:
-                print("Skipping b/c min time < 0")
+                logging.debug("Skipping trace b/c min time < 0")
                 should_skip_sequence = True
 
             # Skip calculating speed for this specific trace point if no time elapsed
@@ -88,21 +91,23 @@ def run(trace_data: list[list[dict]]) -> list[list[dict]]:
             speeds.append(v_kmph)
 
         if should_skip_sequence:
-            print("Skipping b/c should skip seq")
+            logging.debug("Skipping trace b/c should skip seq")
             continue
 
         if num_poor_measurements / len(sequence) > MAXIMUM_POOR_MEASUREMENTS_PERCENT:
-            print("Skipping b/c too many latent traces {}".format(num_poor_measurements))
+            logging.debug(
+                "Skipping trace b/c too many latent traces {}".format(num_poor_measurements)
+            )
             continue
 
         # Skip if distance traveled on sequence isn't long enough
         if total_dist < MINIMUM_TOTAL_DISTANCE:
-            print("Skipping b/c min total dist {}".format(total_dist))
+            logging.debug("Skipping trace b/c min total dist {}".format(total_dist))
             continue
 
         # Skip if we feel like the average speed in this sequence isn't fast enough correspond with someone driving
         if np.array(speeds).mean() < MINIMUM_MEAN_SPEED:
-            print("Skipping b/c mean speed {}".format(np.array(speeds).mean()))
+            logging.debug("Skipping trace b/c mean speed {}".format(np.array(speeds).mean()))
             continue
 
         filtered_trace_data.append(sequence)
