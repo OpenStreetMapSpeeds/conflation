@@ -2,6 +2,8 @@
 import argparse
 import json
 import multiprocessing
+import shutil
+import time
 
 from conflation import aggregation, util
 from conflation.map_matching import valhalla
@@ -37,6 +39,9 @@ def main():
     )
 
     # TODO: Change print() to use logger and add logging level as arg
+
+    # Log time taken for the run
+    start = time.time()
 
     parsed_args = arg_parser.parse_args()
 
@@ -111,7 +116,12 @@ def main():
     print("Map matching complete, aggregating data into final .json output files...")
     aggregation.run(map_matches_dir, results_dir)
 
-    print("Done!")
+    # Delete the tmp dir since we are finished with the run
+    shutil.rmtree(tmp_dir)
+
+    # Print out the time elapsed for this entire run
+    end = time.time()
+    print("Script finished run in {} seconds.".format(end - start))
 
 
 if __name__ == "__main__":

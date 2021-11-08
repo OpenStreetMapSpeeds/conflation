@@ -20,8 +20,8 @@ To summarize, Valhalla is capable of building routing tilesets and running route
 time of arrival can be fairly inaccurate, especially in urban areas with high traffic. The estimated speeds were more
 akin to driving alone at night, which is not ideal since most people drive in the day in urbanized areas.
 
-Conflation aims to provide a *statistical approach* to estimating of driving speeds. Specifically, this project
-estimates speeds across different road classes using open-source GPS trace data. The road classes used will be taken
+Conflation aims to provide a *statistical approach* to estimating driving speeds. Specifically, this project estimates
+speeds across different road classes using open-source GPS trace data. The road classes used will be taken
 from [OpenStreetMap (OSM)](https://www.openstreetmap.org/), which delineates between motorways, trunks, primary roads,
 secondary roads, residential, etc. To further refine our estimates, we will also split up our results by geographic
 area (country and region), as well as by urban, suburban, and rural settings.
@@ -31,7 +31,7 @@ area (country and region), as well as by urban, suburban, and rural settings.
 A high-level methodology of this script is as follows:
 
 1. Create an `output/` folder where results will be stored.
-    1. This script store intermediate results on disk, so that if a run is interrupted (either intentionally or
+    1. This script stores intermediate results on disk, so that if a run is interrupted (either intentionally or
        accidentally) it can automatically pick up from where it left off. Since we eventually intend to have this script
        runnable on the entire planet, not having to make repeated API calls or repeat calculations will be useful.
     2. This script also will store the final results in this output folder (`output/results/`).
@@ -87,10 +87,10 @@ There is a specific JSON structure that this script outputs. Here is an example:
 
 ### Quickstart Example
 
-This project uses Python 3.9. The script can be run by setting up a virtualenv, installing modules from 
+This project uses Python 3.9. The script can be run by setting up a virtualenv, installing modules from
 `requirements.txt`, and calling the `conflation/main.py` script.
 
-Here is an example setup and run across a wide area in Manhattan NYC, with Mapillary client ID redacted (assuming you 
+Here is an example setup and run across a wide area in Manhattan NYC, with Mapillary client ID redacted (assuming you
 have Python 3.9 installed using `python3`):
 
 ```bash
@@ -104,7 +104,7 @@ python3 -m conflation --bbox=...
 
 ### Arguments
 
- There are a few args that need to be specified:
+There are a few args that need to be specified:
 
 | Argument | Behavior |
 |----------|----------|
@@ -116,7 +116,7 @@ python3 -m conflation --bbox=...
 For the `--trace-config` and `--map-matching-config` arguments, JSONs needs to be specified as the value. Here are the
 keys accepted by both JSONs:
 
-####--trace-config
+#### --trace-config
 
 Currently, only Mapillary is supported as an API trace provider. The JSON can hold the following keys:
 
@@ -129,7 +129,22 @@ Currently, only Mapillary is supported as an API trace provider. The JSON can ho
 | `max_sequences_per_bbox_section` | Optional - Number of Mapillary sequences that should be pulled for each bbox section (i.e each zoom 14 tile). Default = 500 |
 | `skip_if_fewer_imgs_than` | Optional - Skip a Mapillary sequence if it has fewer Mapillary images than this value. Default = 30 |
 
-####--map-matching-config
+##### Mapillary API Client Secret
+
+You can obtain a client secret by doing the following (instructions last updated 11/2021):
+
+* Go to www.mapillary.com, create an account or log in
+* Click on Dashboard (top right corner)
+* Click on "Developers" on the left sidebar
+* Click on "Register application" and fill out the form
+    * Feel free to simply use http://localhost:8080/ as the "Callback URL" and https://github.com/OpenStreetMapSpeeds as
+      the "Company website"
+    * Allow this application to READ
+* Click on "View" under "Client secret" once the application is created
+* It will look something like this: `MLY|123456789|abcd1234` – only the part after the second `|` is necessary (
+  i.e. `"client_secret":"abcd1234"`)
+
+#### --map-matching-config
 
 Currently, only Valhalla is supported as a map matching provider. The JSON can hold the following keys:
 
@@ -139,7 +154,6 @@ Currently, only Valhalla is supported as a map matching provider. The JSON can h
 | `base_url` | The base URL of your running Valhalla service (example format: `https://aws.my.valhalla.com/`)  |
 | `headers` | Optional - Headers JSON that will be passed along in each call to Valhalla |
 
-
 ## Contributing
 
 We welcome contributions to Conflation. If you would like to report an issue, or even better fix an existing one, please
@@ -147,7 +161,9 @@ use the [Conflation issue tracker](https://github.com/OpenStreetMapSpeeds/confla
 
 To install the project in development mode plus the needed libraries, do a `pip install -e ".[dev]"`.
 
-We encourage you to install the pre-commit hooks by typing `pre-commit install` which will run the following commands to lint and style-check your code before committing:
+We encourage you to install the pre-commit hooks by typing `pre-commit install` which will run the following commands to
+lint and style-check your code before committing:
+
 ```shell script
 flake8 .
 black .
