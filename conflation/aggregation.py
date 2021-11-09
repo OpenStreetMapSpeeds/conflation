@@ -76,6 +76,7 @@ def run(map_matches_dir: str, results_dir: str) -> None:
         logging.info("Final config already built. Skipping...")
         return
 
+    world_level_data = []
     final_config = []
     for subdir, dirs, files in os.walk(map_matches_dir):  # Iterating over countries
         # Pull the country using the name of the subdir
@@ -129,8 +130,16 @@ def run(map_matches_dir: str, results_dir: str) -> None:
                 measurements_to_config(df.groupby(MAP_MATCH_COLS[:-1]).median(), country, None)
             )
 
-    # TODO: Do the same aggregation at the world level. Probably need to implement another pandas DF that holds data
-    #   for each country, then at the end (here) we can do a weighted group by
+            # Also update the world's data
+            world_level_data.extend(country_level_data)
+
+    # Do the same aggregation at the world level
+    if len(world_level_data):
+        df = pd.DataFrame(world_level_data, columns=MAP_MATCH_COLS)
+
+        final_config.append(
+            measurements_to_config(df.groupby(MAP_MATCH_COLS[:-1]).median(), None, None)
+        )
 
     if len(final_config) == 0:  # No data from map match, assume that something went wrong
         return
