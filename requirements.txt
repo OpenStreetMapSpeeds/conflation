@@ -1,0 +1,4 @@
+protobuf
+numpy
+pandas
+requests

@@ -61,7 +61,11 @@ def run(
     httpd = server_class(server_address, handler_class)
     logging.info("Starting httpd and opening Mapillary to authenticate...")
     try:
-        webbrowser.open_new_tab(AUTH_URL.format(client_id))
+        auth_url = AUTH_URL.format(client_id)
+        logging.info(
+            "Please authenticate (if browser didn't automatically open): {}".format(auth_url)
+        )
+        webbrowser.open_new_tab(auth_url)
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
