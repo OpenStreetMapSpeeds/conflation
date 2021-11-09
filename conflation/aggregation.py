@@ -229,7 +229,7 @@ def perform_interp_extrap(config: dict) -> dict:
             indexes_with_data = [i for i, v in enumerate(speeds) if v is not None]
             values_for_indexes_with_data = [v for i, v in enumerate(speeds) if v is not None]
 
-            # If there is only one data point, there is not way to inter/extrapolate, so skip
+            # If there is only one data point, there is no way to inter/extrapolate, so skip
             if len(indexes_with_data) < 2:
                 continue
 
