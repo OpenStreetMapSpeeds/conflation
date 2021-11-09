@@ -100,11 +100,13 @@ def run(map_matches_dir: str, results_dir: str) -> None:
                 logging.critical("{} pickle could not be loaded. Cannot perform aggregation.")
                 continue
 
-            # Combine the data with other data from the same region
-            if region not in regions:
-                regions[region] = map_match_data
-            else:
-                regions[region].extend(map_match_data)
+            # Combine the data with other data from the same region. Sometimes the region isn't detected and it's just
+            # an empty string. In this case, don't add it to the regions dict but add it to the overall country data
+            if region:
+                if region not in regions:
+                    regions[region] = map_match_data
+                else:
+                    regions[region].extend(map_match_data)
 
             # Aggregate country level statistics
             country_level_data.extend(map_match_data)
