@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+import numpy as np
 import os
 import pandas as pd
 import pickle
@@ -45,6 +46,13 @@ BASE_CONFIG = {
         "drive-through": None,
     },
 }
+
+# Linear inter/extrapolation will be performed on these densities and these types
+DENSITIES_TO_LINEAR_INTERP = ["rural", "suburban", "urban"]
+TYPES_TO_LINEAR_INTERP = ["way", "link_exiting", "link_turning", "roundabout"]
+EXTRAP_MAX_SPEED = 140  # Max possible speed result while extrapolating
+EXTRAP_MIN_SPEED = 10  # Min possible speed result while extrapolating
+
 ROAD_CLASS_INDEX_MAPPING = {
     "motorway": 0,
     "trunk": 1,
@@ -201,6 +209,61 @@ def measurements_to_config(
         elif type_ in ["driveway", "alley", "parking_aisle", "drive-through"]:
             config[density][type_] = kph
         else:
-            logging.warning("Type {} not supported".format(type))
+            logging.warning("Type {} not supported".format(type_))
+
+    return perform_interp_extrap(config)
+
+
+def perform_interp_extrap(config: dict) -> dict:
+    """
+    If we are missing measurements, we can perform linear interpolation / extrapolation to fill it out.
+
+    :param config: dict from measurements_to_config()
+    :return: config dict with interp and extrap completed (speed values filled in for road classes where possible)
+    """
+    #
+    for density in DENSITIES_TO_LINEAR_INTERP:
+        for type_ in TYPES_TO_LINEAR_INTERP:
+            speeds = config[density][type_]
+            # Pull out the road classes we have data for
+            indexes_with_data = [i for i, v in enumerate(speeds) if v is not None]
+            values_for_indexes_with_data = [v for i, v in enumerate(speeds) if v is not None]
+
+            # If there is only one data point, there is not way to inter/extrapolate, so skip
+            if len(indexes_with_data) < 2:
+                continue
+
+            # Interpolate with np.interp, which is a piecewise linear interpolation
+            for i in range(len(speeds)):
+                if speeds[i] is None and min(indexes_with_data) < i < max(indexes_with_data):
+                    speeds[i] = round(
+                        np.interp(i, indexes_with_data, values_for_indexes_with_data)
+                    )
+
+            # Extrapolate to fill out both ends of the list. Create a stack and add all indexes that are empty until we
+            # hit indexes that we have data for. Then calculates the slope at that point and fills in the empty indexes
+            stack = []
+            for i in range(len(speeds)):
+                if speeds[i] is None:
+                    stack.append(i)
+                else:
+                    # Note that we know there are at least two adjacent filled in speed values here
+                    slope = speeds[i + 1] - speeds[i]
+                    while len(stack) > 0:
+                        j = stack.pop()
+                        speeds[j] = min(speeds[i] - (i - j) * slope, EXTRAP_MAX_SPEED)
+                    break  # Work is done for this end, stop the iteration
+            # Repeat the process but for the other end of the speeds list
+            for i in range(len(speeds) - 1, -1, -1):
+                if speeds[i] is None:
+                    stack.append(i)
+                else:
+                    # Note that we know there are at least two adjacent filled in speed values here
+                    slope = speeds[i] - speeds[i - 1]
+                    while len(stack) > 0:
+                        j = stack.pop()
+                        # There's a chance for negatives on this end, so prevent it if it's going to happen
+                        speeds[j] = max(speeds[i] + (j - i) * slope, EXTRAP_MIN_SPEED)
+                    break  # Work is done for this end, stop the iteration
 
     return config

@@ -1,16 +1,4 @@
 #!/usr/bin/env python3
-"""
-update mapillary config items to take client_id and client_secret
-generate auth url and print to screen, should be of the form: https://www.mapillary.com/connect?client_id={}
-start the server above to wait for the auth callback to happen, note that the app has to be configured to call back localhost:8080
-when the callback happens we authorize to get token in do_GET above, we should store the auth_token that is returned somewhere for later use in other requests
-programatically kill the httpd
-continue with the rest of the work
-
-
-Usage::
-    ./server.py mapillary_client_id mapillary_client_secret
-"""
 import logging
 import requests
 import webbrowser
@@ -32,6 +20,12 @@ class S(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        """
+        This endpoint is opened so that we can receive the access token from Mapillary. When the user authenticates
+        through the OAuth link, Mapillary redirects to localhost:8080 (configured inside Mapillary dashboard) and this
+        endpoint catches that and parses the auth code and makes a request to get the access token. After getting the
+        token, it stores it in a global variable and closes the HTTP server by raising an interrupt.
+        """
         global client_id
         global client_secret
         global access_token
@@ -44,12 +38,19 @@ class S(BaseHTTPRequestHandler):
             headers=headers,
         ).json()
         access_token = resp["access_token"]
+
+        # Raise a KeyboardInterrupt to close the HTTP server since we don't need it anymore
         raise KeyboardInterrupt
 
 
 def run(
     client_id_: str, client_secret_: str, server_class=HTTPServer, handler_class=S, port=8080
 ) -> str:
+    """
+    Generates a Mapillary OAuth url and prints to screen as well as opens it automatically in a browser. Declares some
+    global variables to pull data from the HTTP server through the GET endpoint.
+    """
+    # These global variables are defined so that we can pass data to / get data from the GET endpoint
     global client_id
     global client_secret
     global access_token
@@ -61,6 +62,7 @@ def run(
     httpd = server_class(server_address, handler_class)
     logging.info("Starting httpd and opening Mapillary to authenticate...")
     try:
+        # Print the OAuth link to console and also tries to open it directly in the browser
         auth_url = AUTH_URL.format(client_id)
         logging.info(
             "Please authenticate (if browser didn't automatically open): {}".format(auth_url)
