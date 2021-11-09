@@ -88,6 +88,11 @@ def main():
         access_token = auth_server.run(
             trace_config["client_id"], trace_config["client_secret"]
         )
+
+        # Puts a small delay here to address a problem with Mapillary not registering the access_token immediately after
+        # distributing it
+        time.sleep(5)
+
         mapillary.run(
             parsed_args.bbox,
             traces_dir,
@@ -128,8 +133,6 @@ def main():
             )
         )
 
-    # Next step: directories grouped by country, files grouped by region, files will be .pickles of lists where
-    # each row is a per-edge measurement
     logging.info("Map matching complete, aggregating data into final .json output files...")
     aggregation.run(map_matches_dir, results_dir)
 
@@ -138,7 +141,7 @@ def main():
 
     # Print out the time elapsed for this entire run
     end = time.time()
-    logging.info("Script finished run in {} seconds.".format(end - start))
+    logging.info("Script finished run in {} seconds.".format(round(end - start, 4)))
 
 
 if __name__ == "__main__":
