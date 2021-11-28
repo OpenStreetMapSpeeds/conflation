@@ -138,7 +138,7 @@ def add_map_matches_for_shape(
     :param shape: "Shape" object that is passed into Valhalla's APIs. See Valhalla's README for more specifications
     :param conf: Dict of configs. See "--map-matching-config" section of README for keys
     """
-    body = {"shape": shape, "costing": "auto", "shape_match": "map_snap"}
+    body = {"shape": shape, "costing": "auto", "shape_match": "map_snap", "use_timestamps": True}
     base_url = conf["base_url"]
     headers = conf["headers"] if "headers" in conf else None
 
