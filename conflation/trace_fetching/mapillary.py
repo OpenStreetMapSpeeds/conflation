@@ -44,20 +44,14 @@ SEQUENCE_URL = "https://graph.mapillary.com/image_ids?fields=id&sequence_id={}&a
 IMAGES_URL = "https://graph.mapillary.com/images?fields=captured_at,geometry&image_ids={}&access_token={}"
 
 
-@sleep_and_retry
-@limits(calls=MAPILLARY_MAX_CALLS_PER_MINUTE, period=MAPILLARY_PERIOD_MINUTE)
 def call_coverage_tiles(session_, zoom, x, y, access_token_) -> requests.Response:
     return session_.get(COVERAGE_TILES_URL.format(zoom, x, y, access_token_))
 
 
-@sleep_and_retry
-@limits(calls=MAPILLARY_MAX_CALLS_PER_MINUTE, period=MAPILLARY_PERIOD_MINUTE)
 def call_sequence(session_, sequence_id, access_token_) -> requests.Response:
     return session_.get(SEQUENCE_URL.format(sequence_id, access_token_))
 
 
-@sleep_and_retry
-@limits(calls=MAPILLARY_MAX_CALLS_PER_MINUTE, period=MAPILLARY_PERIOD_MINUTE)
 def call_images(session_, image_ids, access_token_) -> requests.Response:
     return session_.get(IMAGES_URL.format(",".join(image_ids), access_token_))
 
@@ -111,6 +105,8 @@ def run(
     finished_sequence_id_blocks = multiprocessing.Value("i", 0)
     skipped_sequences_due_to_filters = multiprocessing.Value("i", 0)
 
+    mapillary_max_calls_per_minute = round(MAPILLARY_MAX_CALLS_PER_MINUTE / processes)
+
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
         initargs=(
@@ -122,6 +118,7 @@ def run(
             finished_sequence_id_blocks,
             start_date_epoch,
             skipped_sequences_due_to_filters,
+            mapillary_max_calls_per_minute,
         ),
         processes=processes,
     ) as pool:
@@ -205,6 +202,7 @@ def initialize_multiprocess(
     finished_sequence_id_blocks_: multiprocessing.Value,
     start_date_epoch_: int,
     skipped_sequences_due_to_filters_: multiprocessing.Value,
+    mapillary_max_calls_per_minute_: int,
 ) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess API requests.
@@ -236,6 +234,28 @@ def initialize_multiprocess(
 
     global skipped_sequences_due_to_filters
     skipped_sequences_due_to_filters = skipped_sequences_due_to_filters_
+
+    # Rate limited functions that wrap calls to the Mapillary API
+    global rl_call_coverage_tiles
+    rl_call_coverage_tiles = sleep_and_retry(
+        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
+            call_coverage_tiles
+        )
+    )
+
+    global rl_call_sequence
+    rl_call_sequence = sleep_and_retry(
+        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
+            call_sequence
+        )
+    )
+
+    global rl_call_images
+    rl_call_images = sleep_and_retry(
+        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
+            call_images
+        )
+    )
 
 
 def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
@@ -350,7 +370,7 @@ def make_sequence_ids_requests(
     # with duplicates)
     seen_sequences = set()
 
-    resp = call_coverage_tiles(session_, BBOX_SECTION_ZOOM, tile[0], tile[1], access_token)
+    resp = rl_call_coverage_tiles(session_, BBOX_SECTION_ZOOM, tile[0], tile[1], access_token)
 
     tile_pb = vector_tile_pb2.Tile()
     tile_pb.ParseFromString(resp.content)
@@ -404,7 +424,7 @@ def make_trace_data_requests(
 
     sequences = []
     for sequence_id in sequence_ids:
-        sequence_resp = call_sequence(session_, sequence_id, access_token)
+        sequence_resp = rl_call_sequence(session_, sequence_id, access_token)
         image_ids = [img_id_obj["id"] for img_id_obj in sequence_resp.json()["data"]]
 
         # Skip sequences that have too few images
@@ -413,7 +433,7 @@ def make_trace_data_requests(
                 skipped_sequences_due_to_filters.value += 1
             continue
 
-        images_resp = call_images(session_, image_ids, access_token)
+        images_resp = rl_call_images(session_, image_ids, access_token)
         images = [
             {  # Convert to seconds because filtering / map matching assumes time in seconds
                 "time": img_obj["captured_at"] / 1000,
@@ -537,6 +557,7 @@ def split_bbox(
                 base_x_zoom_14 = x * 2 ** (BBOX_SECTION_ZOOM - COVERAGE_ZOOM)
                 base_y_zoom_14 = y * 2 ** (BBOX_SECTION_ZOOM - COVERAGE_ZOOM)
 
+                # The calls here don't need to be rate limited since there there are only so many z5 tiles
                 resp = call_coverage_tiles(session_, COVERAGE_ZOOM, x, y, access_token_)
 
                 tile_pb = vector_tile_pb2.Tile()
