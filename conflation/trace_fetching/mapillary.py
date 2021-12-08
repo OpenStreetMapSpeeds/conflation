@@ -42,6 +42,9 @@ IMAGES_URL = "https://graph.mapillary.com/images?fields=captured_at,geometry&ima
 
 # For all of the Mapillary calls, we need to rate limit them. The rate limit is 60k / min (last updated: 12/2021); we
 # give a small leeway to make sure we don't go over
+# Note(rzyc): The API calls are made from different processes and the `ratelimit` module currently rate limits within
+#  each individual process but not globally. So we will later have to divide up this global rate limit by the number
+#  of processes
 MAPILLARY_MAX_CALLS_PER_MINUTE = 59000
 MAPILLARY_PERIOD_MINUTE = 60
 
@@ -103,7 +106,10 @@ def run(
     finished_sequence_id_blocks = multiprocessing.Value("i", 0)
     skipped_sequences_due_to_filters = multiprocessing.Value("i", 0)
 
-    mapillary_max_calls_per_minute = round(MAPILLARY_MAX_CALLS_PER_MINUTE / processes)
+    # Divide up the total rate limit by the number of processes
+    mapillary_max_calls_per_process_per_minute = round(
+        MAPILLARY_MAX_CALLS_PER_MINUTE / processes
+    )
 
     with multiprocessing.Pool(
         initializer=initialize_multiprocess,
@@ -116,7 +122,7 @@ def run(
             finished_sequence_id_blocks,
             start_date_epoch,
             skipped_sequences_due_to_filters,
-            mapillary_max_calls_per_minute,
+            mapillary_max_calls_per_process_per_minute,
         ),
         processes=processes,
     ) as pool:
@@ -200,7 +206,7 @@ def initialize_multiprocess(
     finished_sequence_id_blocks_: multiprocessing.Value,
     start_date_epoch_: int,
     skipped_sequences_due_to_filters_: multiprocessing.Value,
-    mapillary_max_calls_per_minute_: int,
+    mapillary_max_calls_per_process_per_minute_: int,
 ) -> None:
     """
     Initializes global variables referenced / updated by all threads of the multiprocess API requests.
@@ -233,12 +239,13 @@ def initialize_multiprocess(
     global skipped_sequences_due_to_filters
     skipped_sequences_due_to_filters = skipped_sequences_due_to_filters_
 
-    # Rate limited functions that wrap calls to the Mapillary API
+    # Introduce decorators to the global rate limit check function; each thread gets their own version of this decorated
+    # function with a rate limit of (GLOBAL_RATE_LIMIT / #processes) / TIME_PERIOD
     global check_rate_limit
     check_rate_limit = sleep_and_retry(
-        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
-            check_rate_limit_undecorated
-        )
+        limits(
+            calls=mapillary_max_calls_per_process_per_minute_, period=MAPILLARY_PERIOD_MINUTE
+        )(check_rate_limit_undecorated)
     )
 
 
