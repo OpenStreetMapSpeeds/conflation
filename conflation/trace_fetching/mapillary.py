@@ -33,27 +33,25 @@ SEQUENCE_ID_BLOCK_SIZE = 10
 # Name of the dir where we store sequence IDs pulled from Mapillary
 SEQUENCE_IDS_DIR_NAME = "seq_ids"
 
-# For all of the Mapillary calls, we need to rate limit them. We use the `ratelimit` module and decorators to do this
-MAPILLARY_MAX_CALLS_PER_MINUTE = 59000
-MAPILLARY_PERIOD_MINUTE = 60
-
+# Mapillary API URLs
 COVERAGE_TILES_URL = (
     "https://tiles.mapillary.com/maps/vtp/mly1_public/2/{}/{}/{}?access_token={}"
 )
 SEQUENCE_URL = "https://graph.mapillary.com/image_ids?fields=id&sequence_id={}&access_token={}"
 IMAGES_URL = "https://graph.mapillary.com/images?fields=captured_at,geometry&image_ids={}&access_token={}"
 
-
-def call_coverage_tiles(session_, zoom, x, y, access_token_) -> requests.Response:
-    return session_.get(COVERAGE_TILES_URL.format(zoom, x, y, access_token_))
-
-
-def call_sequence(session_, sequence_id, access_token_) -> requests.Response:
-    return session_.get(SEQUENCE_URL.format(sequence_id, access_token_))
+# For all of the Mapillary calls, we need to rate limit them. The rate limit is 60k / min (last updated: 12/2021); we
+# give a small leeway to make sure we don't go over
+MAPILLARY_MAX_CALLS_PER_MINUTE = 59000
+MAPILLARY_PERIOD_MINUTE = 60
 
 
-def call_images(session_, image_ids, access_token_) -> requests.Response:
-    return session_.get(IMAGES_URL.format(",".join(image_ids), access_token_))
+def check_rate_limit_undecorated() -> None:
+    """
+    This method does nothing, but we will add rate-limiting decorators to it and use it as a buffer before any Mapillary
+    API calls.
+    """
+    return
 
 
 def run(
@@ -236,24 +234,10 @@ def initialize_multiprocess(
     skipped_sequences_due_to_filters = skipped_sequences_due_to_filters_
 
     # Rate limited functions that wrap calls to the Mapillary API
-    global rl_call_coverage_tiles
-    rl_call_coverage_tiles = sleep_and_retry(
+    global check_rate_limit
+    check_rate_limit = sleep_and_retry(
         limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
-            call_coverage_tiles
-        )
-    )
-
-    global rl_call_sequence
-    rl_call_sequence = sleep_and_retry(
-        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
-            call_sequence
-        )
-    )
-
-    global rl_call_images
-    rl_call_images = sleep_and_retry(
-        limits(calls=mapillary_max_calls_per_minute_, period=MAPILLARY_PERIOD_MINUTE)(
-            call_images
+            check_rate_limit_undecorated
         )
     )
 
@@ -370,7 +354,10 @@ def make_sequence_ids_requests(
     # with duplicates)
     seen_sequences = set()
 
-    resp = rl_call_coverage_tiles(session_, BBOX_SECTION_ZOOM, tile[0], tile[1], access_token)
+    check_rate_limit()  # Check the Mapillary rate limit
+    resp = session_.get(
+        COVERAGE_TILES_URL.format(BBOX_SECTION_ZOOM, tile[0], tile[1], access_token)
+    )
 
     tile_pb = vector_tile_pb2.Tile()
     tile_pb.ParseFromString(resp.content)
@@ -424,7 +411,8 @@ def make_trace_data_requests(
 
     sequences = []
     for sequence_id in sequence_ids:
-        sequence_resp = rl_call_sequence(session_, sequence_id, access_token)
+        check_rate_limit()  # Check the Mapillary rate limit
+        sequence_resp = session_.get(SEQUENCE_URL.format(sequence_id, access_token))
         image_ids = [img_id_obj["id"] for img_id_obj in sequence_resp.json()["data"]]
 
         # Skip sequences that have too few images
@@ -433,7 +421,8 @@ def make_trace_data_requests(
                 skipped_sequences_due_to_filters.value += 1
             continue
 
-        images_resp = rl_call_images(session_, image_ids, access_token)
+        check_rate_limit()  # Check the Mapillary rate limit
+        images_resp = session_.get(IMAGES_URL.format(",".join(image_ids), access_token))
         images = [
             {  # Convert to seconds because filtering / map matching assumes time in seconds
                 "time": img_obj["captured_at"] / 1000,
@@ -558,7 +547,9 @@ def split_bbox(
                 base_y_zoom_14 = y * 2 ** (BBOX_SECTION_ZOOM - COVERAGE_ZOOM)
 
                 # The calls here don't need to be rate limited since there there are only so many z5 tiles
-                resp = call_coverage_tiles(session_, COVERAGE_ZOOM, x, y, access_token_)
+                resp = session_.get(
+                    COVERAGE_TILES_URL.format(COVERAGE_ZOOM, x, y, access_token_)
+                )
 
                 tile_pb = vector_tile_pb2.Tile()
                 tile_pb.ParseFromString(resp.content)
