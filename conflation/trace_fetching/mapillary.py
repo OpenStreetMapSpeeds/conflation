@@ -720,6 +720,13 @@ def get_tile_from_lon_lat(lon: float, lat: float, zoom: int) -> tuple[int, int]:
     """
     Turns a lon/lat measurement into a Slippy map tile at a given zoom.
     """
+
+    # Clamps lon, lat to proper mercator projection values
+    lat = min(lat, 85.0511)
+    lat = max(lat, -85.0511)
+    lon = min(lon, 179.9999)
+    lon = max(lon, -179.9999)
+
     lat_rad = math.radians(lat)
     n = 2.0 ** zoom
     xtile = int((lon + 180.0) / 360.0 * n)
