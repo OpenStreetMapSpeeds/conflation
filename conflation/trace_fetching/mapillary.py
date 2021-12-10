@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 from conflation import util, trace_filter
-from conflation.trace_fetching import vector_tile_pb2
+from conflation.trace_fetching import vector_tile_pb2, routable_z5_tiles
 
 MAX_SEQUENCES_PER_BBOX_SECTION_DEFAULT = (  # Max number of sequences IDs to pull for each z14 tile by default
     500
@@ -77,7 +77,7 @@ def run(
     # Requests session for persistent connections and timeout settings
     session = requests.Session()
     retry_strategy = Retry(
-        total=5, status_forcelist=[429, 500, 502, 503, 504], backoff_factor=3
+        total=5, status_forcelist=[429, 500, 502, 503, 504, 302], backoff_factor=3
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
@@ -542,6 +542,21 @@ def split_bbox(
         )
         for x in range(start_x, end_x + 1):
             for y in range(start_y, end_y + 1):
+                # Check to see if this z5 tile is routable in OSM
+                if (x, y) not in routable_z5_tiles.ROUTABLE_Z5_TILES:
+                    continue
+
+                # The calls here don't need to be rate limited since there there are only so many z5 tiles
+                resp = session_.get(
+                    COVERAGE_TILES_URL.format(COVERAGE_ZOOM, x, y, access_token_)
+                )
+                if resp.status_code != 200:
+                    raise ConnectionError(
+                        "Error pulling z5 tile ({}, {}) from Mapillary: Status {}".format(
+                            x, y, resp.status_code
+                        )
+                    )
+
                 # Create a dir to store trace data for this zoom 5 tile
                 zoom_5_dir = os.path.join(
                     storage_dir, "_".join([str(COVERAGE_ZOOM), str(x), str(y)])
@@ -552,11 +567,6 @@ def split_bbox(
                 # At 14, the top left corner tile (i.e. pixel (0, 0) at zoom 5 tile)
                 base_x_zoom_14 = x * 2 ** (BBOX_SECTION_ZOOM - COVERAGE_ZOOM)
                 base_y_zoom_14 = y * 2 ** (BBOX_SECTION_ZOOM - COVERAGE_ZOOM)
-
-                # The calls here don't need to be rate limited since there there are only so many z5 tiles
-                resp = session_.get(
-                    COVERAGE_TILES_URL.format(COVERAGE_ZOOM, x, y, access_token_)
-                )
 
                 tile_pb = vector_tile_pb2.Tile()
                 tile_pb.ParseFromString(resp.content)
