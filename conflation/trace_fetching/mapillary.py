@@ -77,7 +77,7 @@ def run(
     # Requests session for persistent connections and timeout settings
     session = requests.Session()
     retry_strategy = Retry(
-        total=5, status_forcelist=[429, 500, 502, 503, 504, 302], backoff_factor=3
+        total=5, status_forcelist=[429, 500, 502, 503, 504], backoff_factor=3
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session.mount("https://", adapter)
