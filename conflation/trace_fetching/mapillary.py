@@ -365,6 +365,12 @@ def make_sequence_ids_requests(
     resp = session_.get(
         COVERAGE_TILES_URL.format(BBOX_SECTION_ZOOM, tile[0], tile[1], access_token)
     )
+    if resp.status_code != 200:
+        raise ConnectionError(
+            "Error pulling z14 tile ({}, {}) from Mapillary: Status {}".format(
+                tile[0], tile[1], resp.status_code
+            )
+        )
 
     tile_pb = vector_tile_pb2.Tile()
     tile_pb.ParseFromString(resp.content)
@@ -587,6 +593,9 @@ def split_bbox(
                     )
                 )
 
+        logging.info(
+            "Writing bbox_sections with {} z14 tiles to disk...".format(len(bbox_sections))
+        )
         pickle.dump(bbox_sections, open(sections_filename, "wb"))
 
     return bbox_sections
