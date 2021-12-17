@@ -128,7 +128,15 @@ def run(
     ) as pool:
         # Run the multiprocess job that takes all the bbox_sections, and pulls all the sequence IDs that are within each
         # section
-        result = pool.map_async(pull_sequence_ids_for_bbox, bbox_sections)
+        try:
+            result = pool.map_async(pull_sequence_ids_for_bbox, bbox_sections)
+        except ConnectionError as e:
+            # If there are any ConnectionErrors thrown, it is likely that we were IP banned by the Mapillary tiles
+            # endpoint. Exit entirely if this is the case
+            logging.error("Failed to pull sequence IDs for bbox_sections: {}".format(repr(e)))
+            pool.close()
+            pool.terminate()
+            raise ConnectionError(e)
 
         # This file holds the blocks of unique sequence IDs that we've pulled from Mapillary. See if it already exists;
         # if it does then we don't need to pull sequence IDs from Mapillary again
