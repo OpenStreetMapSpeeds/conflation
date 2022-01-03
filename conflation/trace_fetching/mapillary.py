@@ -656,7 +656,7 @@ def z14_tiles_from_coverage_tile_to_bbox_sections(
                 if keys[feature.tags[i]] != "captured_at":
                     continue
 
-                # Only consider pixels where the latest sequence is less than one year old
+                # Only consider pixels where the latest sequence is recent enough (determined by args)
                 if values[feature.tags[i + 1]].int_value > start_date_epoch_:
                     pixel_x, pixel_y = feature.geometry[1], feature.geometry[2]
 
