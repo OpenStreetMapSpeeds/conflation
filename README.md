@@ -171,5 +171,6 @@ black .
 
 ### Tests
 
-TODO
+To run the unit tests, simply run `python tests.py` (after sourcing your virtualenv). Please use the `unittest` module
+if contributing additional unit tests.
 
