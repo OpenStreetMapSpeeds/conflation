@@ -8,7 +8,7 @@ import time
 
 from conflation import aggregation, util
 from conflation.map_matching import valhalla
-from conflation.trace_fetching import mapillary, mapillary_z5, mapillary_v3, auth_server
+from conflation.trace_fetching import mapillary, mapillary_v3, auth_server
 
 
 def main():
@@ -95,32 +95,6 @@ def main():
 
         mapillary.run(
             parsed_args.bbox,
-            traces_dir,
-            tmp_dir,
-            trace_config,
-            parsed_args.concurrency,
-            access_token,
-        )
-    elif trace_config["provider"] == "mapillary_z5":
-        # Do a quick check to see if user specified the mandatory 'client_id' and 'client_secret' in config JSON
-        if "client_id" not in trace_config:
-            raise KeyError(
-                'Missing "client_id" (Mapillary Client ID) key in --trace-config JSON.'
-            )
-        if "client_secret" not in trace_config:
-            raise KeyError(
-                'Missing "client_secret" (Mapillary Client ID) key in --trace-config JSON.'
-            )
-        access_token = auth_server.run(
-            trace_config["client_id"], trace_config["client_secret"]
-        )
-
-        # Puts a small delay here to address a problem with Mapillary not registering the access_token immediately after
-        # distributing it
-        time.sleep(2)
-
-        mapillary_z5.run(
-            eval(parsed_args.bbox),
             traces_dir,
             tmp_dir,
             trace_config,
