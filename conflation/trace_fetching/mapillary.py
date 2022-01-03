@@ -152,8 +152,8 @@ def run(
             increment = 5
             for result in results:
                 if not result:
-                    # If there are any ConnectionErrors thrown, it is likely that we were IP banned by the Mapillary tiles
-                    # endpoint. Exit entirely if this is the case FIXME
+                    # If pull_sequence_ids_for_bbox returns false, it is likely that we were IP banned by the Mapillary
+                    # tiles endpoint. Exit entirely if this is the case
                     logging.error("Failed to pull sequence IDs for bbox_sections.")
                     pool.close()
                     pool.terminate()
