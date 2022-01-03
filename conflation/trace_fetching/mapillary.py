@@ -126,18 +126,6 @@ def run(
         ),
         processes=processes,
     ) as pool:
-        # Run the multiprocess job that takes all the bbox_sections, and pulls all the sequence IDs that are within each
-        # section
-        try:
-            result = pool.map_async(pull_sequence_ids_for_bbox, bbox_sections)
-        except ConnectionError as e:
-            # If there are any ConnectionErrors thrown, it is likely that we were IP banned by the Mapillary tiles
-            # endpoint. Exit entirely if this is the case
-            logging.error("Failed to pull sequence IDs for bbox_sections: {}".format(repr(e)))
-            pool.close()
-            pool.terminate()
-            raise ConnectionError(e)
-
         # This file holds the blocks of unique sequence IDs that we've pulled from Mapillary. See if it already exists;
         # if it does then we don't need to pull sequence IDs from Mapillary again
         traces_sections_filename = util.get_sections_filename(traces_dir)
@@ -155,10 +143,21 @@ def run(
                     len(bbox_sections), sequence_ids_dir
                 )
             )
+
+            # Run the multiprocess job that takes all the bbox_sections, and pulls all the sequence IDs that are within
+            # each section
+            results = pool.imap_unordered(pull_sequence_ids_for_bbox, bbox_sections)
+
             progress = 0
             increment = 5
-            while not result.ready():
-                result.wait(timeout=5)
+            for result in results:
+                if not result:
+                    # If there are any ConnectionErrors thrown, it is likely that we were IP banned by the Mapillary tiles
+                    # endpoint. Exit entirely if this is the case FIXME
+                    logging.error("Failed to pull sequence IDs for bbox_sections.")
+                    pool.close()
+                    pool.terminate()
+                    raise ConnectionError
                 next_progress = int(finished_bbox_sections.value / len(bbox_sections) * 100)
                 if int(next_progress / increment) > progress:
                     logging.info("Current progress: {}%".format(next_progress))
@@ -257,7 +256,7 @@ def initialize_multiprocess(
     )
 
 
-def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
+def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> bool:
     """
     First, check to see if a bbox section already had sequence IDs pulled onto disk. If not, pull all sequence IDs
     within the current bbox section from Mapillary by calling make_sequence_ids_requests() and save it to disk. Meant to
@@ -276,7 +275,7 @@ def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
             )
             with finished_bbox_sections.get_lock():
                 finished_bbox_sections.value += 1
-            return
+            return True
 
         sequence_ids: set[str] = make_sequence_ids_requests(session, tile, global_config)
 
@@ -290,8 +289,11 @@ def pull_sequence_ids_for_bbox(bbox_section: tuple[int, int, str]) -> None:
 
         with finished_bbox_sections.get_lock():
             finished_bbox_sections.value += 1
+
+        return True
     except Exception as e:
         logging.error("Failed to pull sequence IDs: {}".format(repr(e)))
+        return False
 
 
 def pull_filter_and_save_trace_for_sequence_ids(
