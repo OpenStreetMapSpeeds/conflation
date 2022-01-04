@@ -31,6 +31,7 @@ setup(
         "protobuf>=3.17.3",
         "numpy>=1.20.3",
         "pandas>=1.2.4",
+        "ratelimit>=2.2.1",
     ],
     extras_require={"dev": ["pre-commit", "flake8", "black"]},
     entry_points={"console_scripts": ["conflation=conflation.get_trace_data:main"]},

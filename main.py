@@ -91,7 +91,7 @@ def main():
 
         # Puts a small delay here to address a problem with Mapillary not registering the access_token immediately after
         # distributing it
-        time.sleep(5)
+        time.sleep(2)
 
         mapillary.run(
             parsed_args.bbox,

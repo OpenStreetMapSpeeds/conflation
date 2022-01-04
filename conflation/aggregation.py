@@ -233,6 +233,17 @@ def perform_interp_extrap(config: dict) -> dict:
             if len(indexes_with_data) < 2:
                 continue
 
+            # Check to make sure that the values are monotonically increasing with higher road classes
+            # Note(rzyc): If this is not the case, it usually signals we got poor data. We should not try to interpolate
+            #  / extrapolate since it could lead to very extreme results. E.g. [None, None, 23, 59, None] will turn into
+            #  [10, 10, 23, 59, 95]. Instead, let's just leave it as is and it will fall back to the world defaults
+            should_skip = False
+            for i in range(1, len(values_for_indexes_with_data)):
+                if values_for_indexes_with_data[i - 1] < values_for_indexes_with_data[i]:
+                    should_skip = True
+            if should_skip:
+                continue
+
             # Interpolate with np.interp, which is a piecewise linear interpolation
             for i in range(len(speeds)):
                 if speeds[i] is None and min(indexes_with_data) < i < max(indexes_with_data):
